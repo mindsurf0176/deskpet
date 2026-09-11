@@ -12,11 +12,17 @@ enum AgentFocus {
         cwd: String = ""
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let orcaHint = source == "orca" || !paneKey.isEmpty || !tabId.isEmpty || !worktreeId.isEmpty
+            let orcaHint = source == "orca"
+                || cwd.hasPrefix(NSHomeDirectory() + "/orca/")
+                || !paneKey.isEmpty || !tabId.isEmpty || !worktreeId.isEmpty
             var focusedTerminal = false
             if orcaHint {
-                _ = focusOrcaTerminal(paneKey: paneKey, tabId: tabId, worktreeId: worktreeId)
-                focusedTerminal = true
+                focusedTerminal = focusOrcaTerminal(
+                    paneKey: paneKey,
+                    tabId: tabId,
+                    worktreeId: worktreeId,
+                    cwd: cwd
+                )
             } else {
                 focusedTerminal = focusExternalTerminal(cwd: cwd)
             }
@@ -49,14 +55,29 @@ enum AgentFocus {
     }
 
     @discardableResult
-    private static func focusOrcaTerminal(paneKey: String, tabId: String, worktreeId: String) -> Bool {
-        guard let handle = resolveHandle(paneKey: paneKey, tabId: tabId, worktreeId: worktreeId) else {
+    private static func focusOrcaTerminal(
+        paneKey: String,
+        tabId: String,
+        worktreeId: String,
+        cwd: String
+    ) -> Bool {
+        guard let handle = resolveHandle(
+            paneKey: paneKey,
+            tabId: tabId,
+            worktreeId: worktreeId,
+            cwd: cwd
+        ) else {
             return false
         }
         return runOrca(["terminal", "switch", "--terminal", handle]) != nil
     }
 
-    private static func resolveHandle(paneKey: String, tabId: String, worktreeId: String) -> String? {
+    private static func resolveHandle(
+        paneKey: String,
+        tabId: String,
+        worktreeId: String,
+        cwd: String
+    ) -> String? {
         if paneKey.hasPrefix("term_") { return paneKey }
         guard let data = runOrca(["terminal", "list", "--json", "--include-visual-layouts"]),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -73,11 +94,24 @@ enum AgentFocus {
                 term["leafId"] as? String ?? "",
                 term["worktreeId"] as? String ?? "",
                 term["ptyId"] as? String ?? "",
+                term["cwd"] as? String ?? "",
+                term["path"] as? String ?? "",
             ]
             if needles.contains(where: { needle in fields.contains(where: { field in
                 !needle.isEmpty && (field == needle || field.contains(needle) || needle.contains(field))
             }) }) {
                 return handle.isEmpty ? nil : handle
+            }
+        }
+
+        let wantedCWD = normalize(cwd)
+        if !wantedCWD.isEmpty {
+            let hits = terminals.filter {
+                let candidate = normalize(($0["cwd"] as? String) ?? ($0["path"] as? String) ?? "")
+                return candidate == wantedCWD || candidate.hasPrefix(wantedCWD + "/")
+            }
+            if hits.count == 1, let handle = hits[0]["handle"] as? String, !handle.isEmpty {
+                return handle
             }
         }
 
