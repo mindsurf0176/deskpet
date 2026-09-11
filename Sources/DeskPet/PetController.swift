@@ -82,11 +82,17 @@ final class PetController: NSObject, NSWindowDelegate {
     private var hopping = false
     private var hopStart: CFTimeInterval = 0
     private var hopBaseY: CGFloat = 0
+    private var ledges: [Surface] = []
+    private var currentPerch: Surface?
+    private var falling = false
+    private var fallSpeed: CGFloat = 0
+    private var lastSurfaceScan: CFTimeInterval = 0
 
     var currentPetID: String { settings.petID }
     var currentScale: Double { settings.scale }
     var clickThroughEnabled: Bool { settings.clickThrough }
     var captionsEnabled: Bool { settings.captions }
+    var perchEnabled: Bool { settings.perch }
     private var displaySize: NSSize { settings.displaySize }
 
     init(atlas: SpriteAtlas, settings: DeskPetSettings) {
@@ -208,7 +214,7 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func savePosition() {
-        if hopping { return }
+        if hopping || falling { return }
         lastSavedOrigin = panel.frame.origin
         settings.x = panel.frame.origin.x
         settings.y = panel.frame.origin.y
@@ -277,6 +283,19 @@ final class PetController: NSObject, NSWindowDelegate {
         refreshCaption(from: signal, force: true)
     }
 
+    func applyPerch(_ on: Bool) {
+        settings.perch = on
+        persist()
+        if on {
+            falling = true
+            fallSpeed = 0
+        } else {
+            falling = false
+            fallSpeed = 0
+            currentPerch = nil
+        }
+    }
+
     @objc private func openSettings() {
         var anchor: NSPoint?
         if let button = statusItem?.button, let win = button.window {
@@ -313,9 +332,12 @@ final class PetController: NSObject, NSWindowDelegate {
     @objc private func resetPosition() {
         hidden = false
         hopping = false
+        falling = false
+        fallSpeed = 0
         panel.orderFrontRegardless()
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        panel.setFrameOrigin(NSPoint(x: screen.maxX - displaySize.width - 28, y: screen.minY + 28))
+        panel.setFrameOrigin(NSPoint(x: screen.maxX - displaySize.width - 28, y: screen.minY + (settings.perch ? 0 : 28)))
+        if settings.perch { falling = true }
         savePosition()
         refreshHideTitle()
         updateClickThrough(at: NSEvent.mouseLocation)
@@ -405,9 +427,10 @@ final class PetController: NSObject, NSWindowDelegate {
         }
         expireCaption(now: now)
         stepHop(now: now)
+        stepGravity(now: now)
         advanceFrame(now: now)
         stepWander(now: now)
-        if !hopping, hypot(panel.frame.origin.x - lastSavedOrigin.x, panel.frame.origin.y - lastSavedOrigin.y) > 12 {
+        if !hopping, !falling, hypot(panel.frame.origin.x - lastSavedOrigin.x, panel.frame.origin.y - lastSavedOrigin.y) > 12 {
             savePosition()
         }
     }
@@ -500,7 +523,9 @@ final class PetController: NSObject, NSWindowDelegate {
         guard !reducedMotion, !dragging else { return }
         hopping = true
         hopStart = CACurrentMediaTime()
-        hopBaseY = panel.frame.origin.y
+        hopBaseY = currentPerch?.y ?? panel.frame.origin.y
+        falling = false
+        fallSpeed = 0
     }
 
     private func stepHop(now: CFTimeInterval) {
@@ -515,6 +540,65 @@ final class PetController: NSObject, NSWindowDelegate {
         let decay = 1 - t / duration
         let y = hopBaseY + abs(sin(t / duration * .pi * 3)) * 16 * decay
         panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: y))
+    }
+
+    private func refreshLedges() {
+        let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        ledges = SurfaceScanner.ledges(
+            excluding: [panel.windowNumber],
+            screen: screen,
+            petHeight: displaySize.height
+        )
+    }
+
+    private func stepGravity(now: CFTimeInterval) {
+        guard settings.perch, !dragging, !hidden, !hopping else { return }
+        if now - lastSurfaceScan > 0.28 {
+            lastSurfaceScan = now
+            refreshLedges()
+        }
+        if ledges.isEmpty { refreshLedges() }
+        let support = SurfaceScanner.support(
+            feetX: panel.frame.origin.x,
+            feetY: panel.frame.origin.y,
+            width: displaySize.width,
+            ledges: ledges
+        )
+        let x = min(max(panel.frame.origin.x, support.minX), max(support.minX, support.maxX - displaySize.width))
+        if reducedMotion {
+            falling = false
+            fallSpeed = 0
+            currentPerch = support
+            panel.setFrameOrigin(NSPoint(x: x, y: support.y))
+            return
+        }
+        let gap = panel.frame.origin.y - support.y
+        if gap > 3 {
+            falling = true
+        }
+        if falling {
+            fallSpeed = min(24, fallSpeed + 1.2)
+            var y = panel.frame.origin.y - fallSpeed
+            if y <= support.y {
+                y = support.y
+                falling = false
+                fallSpeed = 0
+                currentPerch = support
+                wanderTarget = nil
+                if activity == .idle, oneshot == nil {
+                    play(.idle)
+                }
+            }
+            panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: y))
+            return
+        }
+        currentPerch = support
+        let outside = panel.frame.origin.x < support.minX - 1 || panel.frame.origin.x > support.maxX - displaySize.width + 1
+        if outside {
+            panel.setFrameOrigin(NSPoint(x: x, y: support.y))
+        } else if abs(panel.frame.origin.y - support.y) > 0.5 {
+            panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: support.y))
+        }
     }
 
     private func advanceFrame(now: CFTimeInterval) {
@@ -555,6 +639,7 @@ final class PetController: NSObject, NSWindowDelegate {
         if dragging {
             return (panel.frame.origin.x >= lastDragX) ? .runningRight : .runningLeft
         }
+        if falling { return .jumping }
         if let oneshot { return oneshot }
         switch activity {
         case .idle: return wanderTarget == nil ? .idle : ((wanderTarget! >= panel.frame.origin.x) ? .runningRight : .runningLeft)
@@ -566,31 +651,55 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func stepWander(now: CFTimeInterval) {
-        guard !reducedMotion, !dragging, !hidden, !hopping, activity == .idle, oneshot == nil else { return }
+        guard !reducedMotion, !dragging, !hidden, !hopping, !falling, activity == .idle, oneshot == nil else { return }
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         if now - lastWanderStep < 0.09 { return }
         lastWanderStep = now
+        let perch = currentPerch
+        let minX: CGFloat
+        let maxX: CGFloat
+        if settings.perch, let perch {
+            minX = perch.minX + 8
+            maxX = perch.maxX - displaySize.width - 8
+        } else {
+            minX = screen.minX + 8
+            maxX = screen.maxX - displaySize.width - 8
+        }
+        let sitY = perch?.y ?? panel.frame.origin.y
         if let target = wanderTarget {
             let x = panel.frame.origin.x
             let step: CGFloat = 7
             if abs(target - x) <= step {
-                panel.setFrameOrigin(NSPoint(x: target, y: panel.frame.origin.y))
+                panel.setFrameOrigin(NSPoint(x: target, y: sitY))
                 wanderTarget = nil
                 play(.idle)
                 nextWanderAt = now + Double.random(in: 12...28)
             } else {
                 let dir: CGFloat = target > x ? 1 : -1
                 var next = x + dir * step
-                next = min(max(next, screen.minX + 8), screen.maxX - displaySize.width - 8)
-                panel.setFrameOrigin(NSPoint(x: next, y: panel.frame.origin.y))
+                if settings.perch, let perch, (next < perch.minX - 2 || next > perch.maxX - displaySize.width + 2) {
+                    falling = true
+                    fallSpeed = 0.6
+                    wanderTarget = nil
+                    currentPerch = nil
+                    let offX = next < perch.minX
+                        ? perch.minX - displaySize.width / 2 - 8
+                        : perch.maxX - displaySize.width / 2 + 8
+                    panel.setFrameOrigin(NSPoint(x: offX, y: panel.frame.origin.y))
+                    return
+                }
+                next = min(max(next, minX), max(minX, maxX))
+                panel.setFrameOrigin(NSPoint(x: next, y: sitY))
             }
             return
         }
         if now >= nextWanderAt {
-            let minX = screen.minX + 8
-            let maxX = screen.maxX - displaySize.width - 8
             guard maxX > minX else { return }
-            wanderTarget = CGFloat.random(in: minX...maxX)
+            if settings.perch, let perch, Double.random(in: 0...1) < 0.22 {
+                wanderTarget = Bool.random() ? perch.minX - displaySize.width - 6 : perch.maxX + 6
+            } else {
+                wanderTarget = CGFloat.random(in: minX...maxX)
+            }
         }
     }
 
@@ -600,6 +709,8 @@ final class PetController: NSObject, NSWindowDelegate {
         windowStart = panel.frame.origin
         lastDragX = windowStart.x
         hopping = false
+        falling = false
+        fallSpeed = 0
         _ = event
     }
 
@@ -625,6 +736,10 @@ final class PetController: NSObject, NSWindowDelegate {
     func mouseUp(with event: NSEvent) {
         if dragging {
             dragging = false
+            if settings.perch {
+                falling = true
+                fallSpeed = 0
+            }
             savePosition()
             play(displayState())
             updateClickThrough(at: NSEvent.mouseLocation)

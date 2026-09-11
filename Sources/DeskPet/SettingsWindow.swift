@@ -13,6 +13,7 @@ final class SettingsController: NSObject {
     private weak var owner: PetController?
     private var clickThroughBox: NSButton!
     private var captionsBox: NSButton!
+    private var perchBox: NSButton!
 
     init(owner: PetController) {
         self.owner = owner
@@ -94,6 +95,10 @@ final class SettingsController: NSObject {
         captions.font = .systemFont(ofSize: 12)
         self.clickThroughBox = clickThrough
         self.captionsBox = captions
+        let perch = NSButton(checkboxWithTitle: L10n.perch, target: self, action: #selector(perchChanged))
+        perch.translatesAutoresizingMaskIntoConstraints = false
+        perch.font = .systemFont(ofSize: 12)
+        self.perchBox = perch
 
         let ends = NSView()
         ends.translatesAutoresizingMaskIntoConstraints = false
@@ -110,6 +115,7 @@ final class SettingsController: NSObject {
         root.addSubview(ends)
         root.addSubview(clickThrough)
         root.addSubview(captions)
+        root.addSubview(perch)
 
         NSLayoutConstraint.activate([
             petCaption.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
@@ -152,9 +158,13 @@ final class SettingsController: NSObject {
             captions.topAnchor.constraint(equalTo: clickThrough.bottomAnchor, constant: 6),
             captions.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
             captions.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            captions.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+
+            perch.topAnchor.constraint(equalTo: captions.bottomAnchor, constant: 6),
+            perch.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            perch.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            perch.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
         ])
-        panel.setContentSize(NSSize(width: 300, height: 236))
+        panel.setContentSize(NSSize(width: 300, height: 264))
     }
 
     private func caption(_ text: String) -> NSTextField {
@@ -198,10 +208,11 @@ final class SettingsController: NSObject {
         refreshSizeLabel(owner.currentScale)
         clickThroughBox.state = owner.clickThroughEnabled ? .on : .off
         captionsBox.state = owner.captionsEnabled ? .on : .off
+        perchBox.state = owner.perchEnabled ? .on : .off
     }
 
     private func refreshSizeLabel(_ scale: Double) {
-        let size = DeskPetSettings(petID: "", scale: scale, x: nil, y: nil, clickThrough: true, captions: true).displaySize
+        let size = DeskPetSettings(petID: "", scale: scale, x: nil, y: nil, clickThrough: true, captions: true, perch: true).displaySize
         sizeLabel.stringValue = "\(Int(size.width.rounded()))×\(Int(size.height.rounded()))"
     }
 
@@ -222,5 +233,9 @@ final class SettingsController: NSObject {
 
     @objc private func captionsChanged() {
         owner?.applyCaptions(captionsBox.state == .on)
+    }
+
+    @objc private func perchChanged() {
+        owner?.applyPerch(perchBox.state == .on)
     }
 }
