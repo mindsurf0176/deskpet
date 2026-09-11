@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy the Codex hook and merge it into ~/.codex/hooks.json."""
+"""Copy the Codex hook and merge it into Codex and Orca hooks.json files."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,20 @@ MARKER = "codex-hook.py"
 
 def command_for(script: Path) -> str:
     return f'/usr/bin/python3 "{script}"'
+
+
+def hook_files() -> list[Path]:
+    home = Path.home()
+    return [
+        home / ".codex" / "hooks.json",
+        home
+        / "Library"
+        / "Application Support"
+        / "orca"
+        / "codex-runtime-home"
+        / "home"
+        / "hooks.json",
+    ]
 
 
 def is_deskpet_block(block: object) -> bool:
@@ -66,13 +80,35 @@ def install(src: Path, dest: Path, hooks_path: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
     dest.chmod(0o755)
+    merge_hooks(dest, hooks_path)
+    print(f"deskpet: installed Codex hook -> {dest}")
+    for path in extra_paths(hooks_path):
+        if path.exists():
+            merge_hooks(dest, path)
+            print(f"deskpet: merged {path}")
+    print("deskpet: trust the new hook with /hooks in Codex and Orca terminals")
+
+
+def extra_paths(primary: Path) -> list[Path]:
+    seen = {primary.resolve()}
+    out: list[Path] = []
+    for path in hook_files():
+        resolved = path.resolve() if path.exists() else path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        out.append(path)
+    return out
+
+
+def merge_hooks(script: Path, hooks_path: Path) -> None:
     data = load_hooks(hooks_path)
     hooks = data["hooks"]
     entry = {
         "hooks": [
             {
                 "type": "command",
-                "command": command_for(dest),
+                "command": command_for(script),
                 "timeout": 2,
             }
         ]
@@ -85,9 +121,6 @@ def install(src: Path, dest: Path, hooks_path: Path) -> None:
         blocks.append(entry)
         hooks[event] = blocks
     write_json(hooks_path, data)
-    print(f"deskpet: installed Codex hook -> {dest}")
-    print(f"deskpet: merged {hooks_path}")
-    print("deskpet: trust the new hook in Codex with /hooks")
 
 
 def uninstall(dest: Path, hooks_path: Path) -> None:
@@ -108,9 +141,6 @@ def uninstall(dest: Path, hooks_path: Path) -> None:
     if changed:
         write_json(hooks_path, data)
         print(f"deskpet: removed Codex hook entries from {hooks_path}")
-    if dest.exists():
-        dest.unlink()
-        print(f"deskpet: removed {dest}")
 
 
 def main() -> int:
@@ -130,6 +160,12 @@ def main() -> int:
     hooks_path = Path(args.hooks).expanduser()
     if args.uninstall:
         uninstall(dest, hooks_path)
+        for path in extra_paths(hooks_path):
+            if path.exists():
+                uninstall(dest, path)
+        if dest.exists():
+            dest.unlink()
+            print(f"deskpet: removed {dest}")
         return 0
     if not args.src:
         print("deskpet: missing hook source", file=sys.stderr)
@@ -144,4 +180,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

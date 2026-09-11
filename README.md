@@ -22,6 +22,7 @@ Needs Swift 5.9+ (`xcode-select --install`). This builds `~/Applications/DeskPet
 Restart OpenCode after install so the plugin loads.
 
 Codex: `make install` also registers `~/.codex/pets/codex-hook.py` in `~/.codex/hooks.json`. Trust it once with `/hooks` so the pet can see this session. Existing Orca/impeccable hooks stay in place.
+Orca's internal Codex uses a separate `hooks.json`; install merges that too. Trust `/hooks` once inside an Orca terminal or pane finishes will stay silent.
 
 ```bash
 make stop       # quit
