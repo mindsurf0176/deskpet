@@ -1,8 +1,10 @@
 import AppKit
+import QuartzCore
 
 final class CaptionView: NSView {
     private let effect = NSVisualEffectView()
     private let label = NSTextField(labelWithString: "")
+    private let maskLayer = CAShapeLayer()
 
     var text: String = "" {
         didSet {
@@ -20,8 +22,7 @@ final class CaptionView: NSView {
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 11
-        effect.layer?.masksToBounds = true
+        effect.layer?.mask = maskLayer
         addSubview(effect)
 
         label.font = .systemFont(ofSize: 11, weight: .semibold)
@@ -40,10 +41,24 @@ final class CaptionView: NSView {
 
     override var isOpaque: Bool { false }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
     override func layout() {
         super.layout()
         effect.frame = bounds
-        label.frame = bounds.insetBy(dx: 8, dy: 3)
+        let bubble = CGRect(x: 0, y: 6, width: bounds.width, height: max(0, bounds.height - 6))
+        label.frame = bubble.insetBy(dx: 8, dy: 3)
+        let path = CGMutablePath()
+        path.addRoundedRect(in: bubble, cornerWidth: 11, cornerHeight: 11)
+        let mid = bounds.midX
+        path.move(to: CGPoint(x: mid - 5.5, y: 6))
+        path.addLine(to: CGPoint(x: mid, y: 0.5))
+        path.addLine(to: CGPoint(x: mid + 5.5, y: 6))
+        path.closeSubpath()
+        maskLayer.frame = bounds
+        maskLayer.path = path
     }
 }
 

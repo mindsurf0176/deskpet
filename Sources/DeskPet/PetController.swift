@@ -80,6 +80,10 @@ final class PetController: NSObject, NSWindowDelegate {
     private var lastSavedOrigin = NSPoint.zero
     private var hidden = false
     private var settings: DeskPetSettings
+    private var settingsMenuItem: NSMenuItem?
+    private var waveMenuItem: NSMenuItem?
+    private var resetMenuItem: NSMenuItem?
+    private var quitMenuItem: NSMenuItem?
     private var settingsController: SettingsController?
     private let reducedMotion: Bool
     private var localMoveMonitor: Any?
@@ -96,19 +100,30 @@ final class PetController: NSObject, NSWindowDelegate {
     private var lastEventAt = Date().timeIntervalSince1970
     private var lastOrcaKinds: [String: ActivityKind] = [:]
     private var primedCompletions = false
+    private var doneFocus: PluginState?
+    private var doneUntil: CFTimeInterval = 0
 
     var currentPetID: String { settings.petID }
     var currentScale: Double { settings.scale }
     var clickThroughEnabled: Bool { settings.clickThrough }
     var captionsEnabled: Bool { settings.captions }
     var perchEnabled: Bool { settings.perch }
+    var gravityEnabled: Bool { settings.gravity }
     var soundEnabled: Bool { settings.sound }
+    var currentLanguage: AppLanguage { settings.language }
+    var currentTone: SpeechTone { settings.tone }
     private var displaySize: NSSize { settings.displaySize }
     private var lastIconName = ""
+
+    private var holdingDone: Bool {
+        doneFocus != nil && CACurrentMediaTime() < doneUntil
+    }
 
     init(atlas: SpriteAtlas, settings: DeskPetSettings) {
         self.atlas = atlas
         self.settings = settings
+        L10n.language = settings.language
+        L10n.tone = settings.tone
         self.reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         self.view = PetView(atlas: atlas)
         self.view.reducedMotion = reducedMotion
@@ -177,8 +192,8 @@ final class PetController: NSObject, NSWindowDelegate {
         if vertical {
             captionView.isHidden = true
         }
-        let captionHeight: CGFloat = showCaption ? 26 : 0
-        let gap: CGFloat = showCaption ? 6 : 0
+        let captionHeight: CGFloat = showCaption ? 32 : 0
+        let gap: CGFloat = showCaption ? 4 : 0
         let size = chromeSize()
         let origin = panel.frame.origin
         if vertical {
@@ -207,7 +222,7 @@ final class PetController: NSObject, NSWindowDelegate {
             return NSSize(width: pet.height, height: pet.width)
         }
         let showCaption = !captionView.isHidden
-        let extra: CGFloat = showCaption ? 32 : 0
+        let extra: CGFloat = showCaption ? 36 : 0
         return NSSize(width: pet.width, height: pet.height + extra)
     }
 
@@ -252,18 +267,26 @@ final class PetController: NSObject, NSWindowDelegate {
         item.button?.imageScaling = .scaleProportionallyDown
         item.button?.toolTip = "DeskPet"
         let menu = NSMenu()
-        menu.addItem(withTitle: L10n.settings, action: #selector(openSettings), keyEquivalent: ",").target = self
+        let settingsItem = menu.addItem(withTitle: L10n.settings, action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        settingsMenuItem = settingsItem
         menu.addItem(.separator())
-        menu.addItem(withTitle: L10n.wave, action: #selector(wave), keyEquivalent: "").target = self
+        let waveItem = menu.addItem(withTitle: L10n.wave, action: #selector(wave), keyEquivalent: "")
+        waveItem.target = self
+        waveMenuItem = waveItem
         let hide = menu.addItem(withTitle: L10n.hide, action: #selector(toggleHidden), keyEquivalent: "")
         hide.target = self
         hideMenuItem = hide
-        menu.addItem(withTitle: L10n.resetPosition, action: #selector(resetPosition), keyEquivalent: "").target = self
+        let resetItem = menu.addItem(withTitle: L10n.resetPosition, action: #selector(resetPosition), keyEquivalent: "")
+        resetItem.target = self
+        resetMenuItem = resetItem
         menu.addItem(.separator())
-        menu.addItem(withTitle: L10n.quit, action: #selector(quit), keyEquivalent: "q").target = self
+        let quitItem = menu.addItem(withTitle: L10n.quit, action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        quitMenuItem = quitItem
         item.menu = menu
         statusItem = item
-        refreshHideTitle()
+        refreshMenuTitles()
         refreshTooltip()
     }
 
@@ -355,14 +378,47 @@ final class PetController: NSObject, NSWindowDelegate {
         settings.perch = on
         persist()
         if on {
+            if settings.gravity {
+                falling = true
+                fallSpeed = 0
+            }
+        } else {
+            falling = settings.gravity
+            fallSpeed = 0
+            currentPerch = nil
+            setFacing(.upright)
+        }
+    }
+
+    func applyGravity(_ on: Bool) {
+        settings.gravity = on
+        persist()
+        if on {
             falling = true
             fallSpeed = 0
         } else {
             falling = false
             fallSpeed = 0
-            currentPerch = nil
-            setFacing(.upright)
         }
+    }
+
+    func applyLanguage(_ language: AppLanguage) {
+        settings.language = language
+        L10n.language = language
+        persist()
+        refreshMenuTitles()
+        refreshTooltip()
+        refreshCaption(from: signal, force: true)
+        settingsController?.reloadCopy()
+    }
+
+    func applyTone(_ tone: SpeechTone) {
+        settings.tone = tone
+        L10n.tone = tone
+        persist()
+        refreshTooltip()
+        refreshCaption(from: signal, force: true)
+        settingsController?.reloadCopy()
     }
 
     func applySound(_ on: Bool) {
@@ -410,8 +466,8 @@ final class PetController: NSObject, NSWindowDelegate {
         fallSpeed = 0
         panel.orderFrontRegardless()
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        panel.setFrameOrigin(NSPoint(x: screen.maxX - displaySize.width - 28, y: screen.minY + (settings.perch ? 0 : 28)))
-        if settings.perch { falling = true }
+        panel.setFrameOrigin(NSPoint(x: screen.maxX - displaySize.width - 28, y: screen.minY + (settings.gravity ? 80 : 28)))
+        if settings.gravity { falling = true }
         savePosition()
         refreshHideTitle()
         updateClickThrough(at: NSEvent.mouseLocation)
@@ -424,6 +480,14 @@ final class PetController: NSObject, NSWindowDelegate {
 
     private func refreshHideTitle() {
         hideMenuItem?.title = hidden ? L10n.show : L10n.hide
+    }
+
+    private func refreshMenuTitles() {
+        settingsMenuItem?.title = L10n.settings
+        waveMenuItem?.title = L10n.wave
+        resetMenuItem?.title = L10n.resetPosition
+        quitMenuItem?.title = L10n.quit
+        refreshHideTitle()
     }
 
     private func refreshTooltip() {
@@ -521,14 +585,29 @@ final class PetController: NSObject, NSWindowDelegate {
         return "\(entry.source)-\(entry.updatedAt)"
     }
 
+    private func focusAgent(source: String, paneKey: String, tabId: String, worktreeId: String, cwd: String) {
+        AgentFocus.activate(
+            source: source,
+            paneKey: paneKey,
+            tabId: tabId,
+            worktreeId: worktreeId,
+            cwd: cwd
+        )
+    }
+
     private func pulseDone(_ event: PluginState) {
         if !hidden { panel.orderFrontRegardless() }
         playAlert(sound: "Glass")
         DoneNotify.shared.finished(event)
         if activity == .waiting { return }
-        setCaption(L10n.captionReview)
-        captionUntil = CACurrentMediaTime() + 2.8
+        doneFocus = event
+        doneUntil = CACurrentMediaTime() + 12
+        if settings.captions, !reducedMotion {
+            setCaption(L10n.captionReview)
+            captionUntil = doneUntil
+        }
         play(.review)
+        updateClickThrough(at: NSEvent.mouseLocation)
     }
 
     private func startDisplayLink() {
@@ -555,7 +634,7 @@ final class PetController: NSObject, NSWindowDelegate {
             panel.ignoresMouseEvents = false
             return
         }
-        if activity == .waiting {
+        if activity == .waiting || holdingDone || activity == .review {
             panel.ignoresMouseEvents = false
             return
         }
@@ -606,6 +685,20 @@ final class PetController: NSObject, NSWindowDelegate {
         let previousKind = activity
         let detailChanged = next.detail != signal.detail || next.kind != signal.kind
         signal = next
+        if holdingDone {
+            if next.kind == .waiting || next.kind == .failed {
+                doneFocus = nil
+                doneUntil = 0
+            } else {
+                if next.kind != activity {
+                    activity = next.kind
+                    refreshTooltip()
+                } else if detailChanged {
+                    refreshTooltip()
+                }
+                return
+            }
+        }
         if detailChanged {
             refreshCaption(from: next)
         }
@@ -659,7 +752,7 @@ final class PetController: NSObject, NSWindowDelegate {
             captionUntil = now + 4
         case .review:
             setCaption(L10n.captionReview)
-            captionUntil = now + 2.4
+            captionUntil = now + 12
         case .running:
             let label = L10n.tool(next.detail)
             if !label.isEmpty {
@@ -675,8 +768,25 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func expireCaption(now: CFTimeInterval) {
+        if doneFocus != nil, now >= doneUntil {
+            doneFocus = nil
+            doneUntil = 0
+            if activity != .waiting {
+                refreshCaption(from: signal, force: true)
+                if !dragging, oneshot == nil {
+                    switch activity {
+                    case .running: play(.running)
+                    case .waiting: play(.waiting)
+                    case .failed: play(.failed)
+                    case .review: play(.review)
+                    case .idle: play(.idle)
+                    }
+                }
+            }
+            updateClickThrough(at: NSEvent.mouseLocation)
+        }
         guard !captionView.isHidden, now >= captionUntil else { return }
-        if activity == .waiting { return }
+        if activity == .waiting || holdingDone { return }
         setCaption("")
     }
 
@@ -714,15 +824,19 @@ final class PetController: NSObject, NSWindowDelegate {
 
     private func refreshLedges() {
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        ledges = SurfaceScanner.ledges(
-            excluding: [panel.windowNumber],
-            screen: screen,
-            petSize: displaySize
-        )
+        if settings.perch {
+            ledges = SurfaceScanner.ledges(
+                excluding: [panel.windowNumber],
+                screen: screen,
+                petSize: displaySize
+            )
+        } else {
+            ledges = [SurfaceScanner.floor(in: screen)]
+        }
     }
 
     private func stepGravity(now: CFTimeInterval) {
-        guard settings.perch, !dragging, !hidden, !hopping else { return }
+        guard settings.gravity, !dragging, !hidden, !hopping else { return }
         if now - lastSurfaceScan > 0.28 {
             lastSurfaceScan = now
             refreshLedges()
@@ -827,6 +941,7 @@ final class PetController: NSObject, NSWindowDelegate {
             return (panel.frame.origin.x >= lastDragX) ? .runningRight : .runningLeft
         }
         if falling { return .jumping }
+        if holdingDone { return .review }
         if let oneshot { return oneshot }
         switch activity {
         case .idle:
@@ -843,7 +958,7 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func stepWander(now: CFTimeInterval) {
-        guard !reducedMotion, !dragging, !hidden, !hopping, !falling, activity == .idle, oneshot == nil else { return }
+        guard !reducedMotion, !dragging, !hidden, !hopping, !falling, !holdingDone, activity == .idle, oneshot == nil else { return }
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         if now - lastWanderStep < 0.09 { return }
         lastWanderStep = now
@@ -965,24 +1080,36 @@ final class PetController: NSObject, NSWindowDelegate {
     func mouseUp(with event: NSEvent) {
         if dragging {
             dragging = false
-            if settings.perch {
+            if settings.gravity {
                 falling = true
                 fallSpeed = 0
             }
             savePosition()
             play(displayState())
             updateClickThrough(at: NSEvent.mouseLocation)
-        } else if event.clickCount >= 1 {
-            play(.waving)
-            if activity == .waiting || activity == .failed {
-                AgentFocus.activate(
-                    source: signal.source,
-                    paneKey: signal.paneKey,
-                    tabId: signal.tabId,
-                    worktreeId: signal.worktreeId,
-                    cwd: signal.cwd
-                )
-            }
+            return
+        }
+        guard event.clickCount >= 1 else { return }
+        play(.waving)
+        if activity == .waiting || activity == .failed {
+            focusAgent(source: signal.source, paneKey: signal.paneKey, tabId: signal.tabId, worktreeId: signal.worktreeId, cwd: signal.cwd)
+            return
+        }
+        if holdingDone, let done = doneFocus {
+            focusAgent(source: done.source, paneKey: done.paneKey, tabId: done.tabId, worktreeId: done.worktreeId, cwd: done.cwd)
+            doneFocus = nil
+            doneUntil = 0
+            refreshCaption(from: signal, force: true)
+            updateClickThrough(at: NSEvent.mouseLocation)
+            return
+        }
+        if activity == .review {
+            focusAgent(source: signal.source, paneKey: signal.paneKey, tabId: signal.tabId, worktreeId: signal.worktreeId, cwd: signal.cwd)
+            return
+        }
+        if settings.captions, activity == .idle {
+            setCaption(L10n.captionHi)
+            captionUntil = CACurrentMediaTime() + 1.6
         }
     }
 

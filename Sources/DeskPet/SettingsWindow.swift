@@ -9,20 +9,36 @@ final class SettingsPanel: NSPanel {
 final class SettingsController: NSObject {
     private let panel: SettingsPanel
     private let petPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let tonePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let slider = NSSlider()
     private let sizeLabel = NSTextField(labelWithString: "")
     private weak var owner: PetController?
     private var clickThroughBox: NSSwitch!
     private var captionsBox: NSSwitch!
     private var perchBox: NSSwitch!
+    private var gravityBox: NSSwitch!
     private var soundBox: NSSwitch!
+    private var petCaption: NSTextField!
+    private var sizeCaption: NSTextField!
+    private var smallHint: NSTextField!
+    private var largeHint: NSTextField!
+    private var speechCaption: NSTextField!
+    private var languageCaption: NSTextField!
+    private var toneCaption: NSTextField!
+    private var optionsCaption: NSTextField!
+    private var clickThroughLabel: NSTextField!
+    private var captionsLabel: NSTextField!
+    private var perchLabel: NSTextField!
+    private var gravityLabel: NSTextField!
+    private var soundLabel: NSTextField!
     private var dismissMonitor: Any?
     private var keyMonitor: Any?
 
     init(owner: PetController) {
         self.owner = owner
         self.panel = SettingsPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 488),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -35,6 +51,7 @@ final class SettingsController: NSObject {
 
     func show(anchor: NSPoint? = nil) {
         reloadPets()
+        reloadCopy()
         syncControls()
         place(anchor: anchor)
         NSApp.activate(ignoringOtherApps: true)
@@ -117,13 +134,14 @@ final class SettingsController: NSObject {
     }
 
     private func buildUI() {
-        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 280, height: 320))
+        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 300, height: 488))
         effect.material = .menu
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
         effect.layer?.cornerRadius = 14
         effect.layer?.masksToBounds = true
+        effect.autoresizingMask = [.width, .height]
         panel.contentView = effect
 
         let root = NSView()
@@ -135,7 +153,7 @@ final class SettingsController: NSObject {
         header.font = .systemFont(ofSize: 15, weight: .semibold)
         header.textColor = .labelColor
 
-        let petCaption = caption(L10n.pet)
+        petCaption = caption(L10n.pet)
         petPopup.translatesAutoresizingMaskIntoConstraints = false
         petPopup.target = self
         petPopup.action = #selector(petChanged)
@@ -143,7 +161,7 @@ final class SettingsController: NSObject {
 
         let sizeRow = NSView()
         sizeRow.translatesAutoresizingMaskIntoConstraints = false
-        let sizeCaption = caption(L10n.size)
+        sizeCaption = caption(L10n.size)
         sizeLabel.translatesAutoresizingMaskIntoConstraints = false
         sizeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         sizeLabel.textColor = .secondaryLabelColor
@@ -161,24 +179,41 @@ final class SettingsController: NSObject {
 
         let ends = NSView()
         ends.translatesAutoresizingMaskIntoConstraints = false
-        let small = hint(L10n.smaller)
-        let large = hint(L10n.larger)
-        large.alignment = .right
-        ends.addSubview(small)
-        ends.addSubview(large)
+        smallHint = hint(L10n.smaller)
+        largeHint = hint(L10n.larger)
+        largeHint.alignment = .right
+        ends.addSubview(smallHint)
+        ends.addSubview(largeHint)
 
         let divider = NSBox()
         divider.translatesAutoresizingMaskIntoConstraints = false
         divider.boxType = .separator
 
-        let optionsCaption = caption(L10n.options)
-        let clickThrough = toggleRow(L10n.clickThrough, #selector(clickThroughChanged))
-        clickThroughBox = clickThrough.1
+        speechCaption = caption(L10n.speech)
+        let languageRow = labeledPopup(L10n.languageLabel, languagePopup, #selector(languageChanged))
+        languageCaption = languageRow.1
+        let toneRow = labeledPopup(L10n.toneLabel, tonePopup, #selector(toneChanged))
+        toneCaption = toneRow.1
         let captions = toggleRow(L10n.captions, #selector(captionsChanged))
+        captionsLabel = captions.2
         captionsBox = captions.1
+
+        let divider2 = NSBox()
+        divider2.translatesAutoresizingMaskIntoConstraints = false
+        divider2.boxType = .separator
+
+        optionsCaption = caption(L10n.options)
+        let clickThrough = toggleRow(L10n.clickThrough, #selector(clickThroughChanged))
+        clickThroughLabel = clickThrough.2
+        clickThroughBox = clickThrough.1
         let perch = toggleRow(L10n.perch, #selector(perchChanged))
+        perchLabel = perch.2
         perchBox = perch.1
+        let gravity = toggleRow(L10n.gravity, #selector(gravityChanged))
+        gravityLabel = gravity.2
+        gravityBox = gravity.1
         let sound = toggleRow(L10n.sound, #selector(soundChanged))
+        soundLabel = sound.2
         soundBox = sound.1
 
         root.addSubview(header)
@@ -188,10 +223,15 @@ final class SettingsController: NSObject {
         root.addSubview(slider)
         root.addSubview(ends)
         root.addSubview(divider)
+        root.addSubview(speechCaption)
+        root.addSubview(languageRow.0)
+        root.addSubview(toneRow.0)
+        root.addSubview(captions.0)
+        root.addSubview(divider2)
         root.addSubview(optionsCaption)
         root.addSubview(clickThrough.0)
-        root.addSubview(captions.0)
         root.addSubview(perch.0)
+        root.addSubview(gravity.0)
         root.addSubview(sound.0)
 
         NSLayoutConstraint.activate([
@@ -232,16 +272,39 @@ final class SettingsController: NSObject {
             ends.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             ends.heightAnchor.constraint(equalToConstant: 14),
 
-            small.leadingAnchor.constraint(equalTo: ends.leadingAnchor),
-            small.centerYAnchor.constraint(equalTo: ends.centerYAnchor),
-            large.trailingAnchor.constraint(equalTo: ends.trailingAnchor),
-            large.centerYAnchor.constraint(equalTo: ends.centerYAnchor),
+            smallHint.leadingAnchor.constraint(equalTo: ends.leadingAnchor),
+            smallHint.centerYAnchor.constraint(equalTo: ends.centerYAnchor),
+            largeHint.trailingAnchor.constraint(equalTo: ends.trailingAnchor),
+            largeHint.centerYAnchor.constraint(equalTo: ends.centerYAnchor),
 
             divider.topAnchor.constraint(equalTo: ends.bottomAnchor, constant: 12),
             divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
-            optionsCaption.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 12),
+            speechCaption.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 12),
+            speechCaption.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            speechCaption.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+
+            languageRow.0.topAnchor.constraint(equalTo: speechCaption.bottomAnchor, constant: 8),
+            languageRow.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            languageRow.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            languageRow.0.heightAnchor.constraint(equalToConstant: 28),
+
+            toneRow.0.topAnchor.constraint(equalTo: languageRow.0.bottomAnchor, constant: 2),
+            toneRow.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            toneRow.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            toneRow.0.heightAnchor.constraint(equalToConstant: 28),
+
+            captions.0.topAnchor.constraint(equalTo: toneRow.0.bottomAnchor, constant: 2),
+            captions.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            captions.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            captions.0.heightAnchor.constraint(equalToConstant: 28),
+
+            divider2.topAnchor.constraint(equalTo: captions.0.bottomAnchor, constant: 12),
+            divider2.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            divider2.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+
+            optionsCaption.topAnchor.constraint(equalTo: divider2.bottomAnchor, constant: 12),
             optionsCaption.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             optionsCaption.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
@@ -250,27 +313,29 @@ final class SettingsController: NSObject {
             clickThrough.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             clickThrough.0.heightAnchor.constraint(equalToConstant: 28),
 
-            captions.0.topAnchor.constraint(equalTo: clickThrough.0.bottomAnchor, constant: 2),
-            captions.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            captions.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            captions.0.heightAnchor.constraint(equalToConstant: 28),
-
-            perch.0.topAnchor.constraint(equalTo: captions.0.bottomAnchor, constant: 2),
+            perch.0.topAnchor.constraint(equalTo: clickThrough.0.bottomAnchor, constant: 2),
             perch.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             perch.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             perch.0.heightAnchor.constraint(equalToConstant: 28),
 
-            sound.0.topAnchor.constraint(equalTo: perch.0.bottomAnchor, constant: 2),
+            gravity.0.topAnchor.constraint(equalTo: perch.0.bottomAnchor, constant: 2),
+            gravity.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            gravity.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            gravity.0.heightAnchor.constraint(equalToConstant: 28),
+
+            sound.0.topAnchor.constraint(equalTo: gravity.0.bottomAnchor, constant: 2),
             sound.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sound.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             sound.0.heightAnchor.constraint(equalToConstant: 28),
             sound.0.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
 
-        panel.setContentSize(NSSize(width: 280, height: 348))
+        fillLanguagePopup()
+        fillTonePopup()
+        panel.setContentSize(NSSize(width: 300, height: 488))
     }
 
-    private func toggleRow(_ title: String, _ action: Selector) -> (NSView, NSSwitch) {
+    private func toggleRow(_ title: String, _ action: Selector) -> (NSView, NSSwitch, NSTextField) {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField(labelWithString: title)
@@ -291,7 +356,31 @@ final class SettingsController: NSObject {
             toggle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             label.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -8),
         ])
-        return (row, toggle)
+        return (row, toggle, label)
+    }
+
+    private func labeledPopup(_ title: String, _ popup: NSPopUpButton, _ action: Selector) -> (NSView, NSTextField) {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let label = NSTextField(labelWithString: title)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = .labelColor
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        popup.target = self
+        popup.action = action
+        popup.controlSize = .small
+        row.addSubview(label)
+        row.addSubview(popup)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            popup.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            popup.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 148),
+            popup.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
+        ])
+        return (row, label)
     }
 
     private func caption(_ text: String) -> NSTextField {
@@ -308,6 +397,53 @@ final class SettingsController: NSObject {
         field.font = .systemFont(ofSize: 11)
         field.textColor = .tertiaryLabelColor
         return field
+    }
+
+    func reloadCopy() {
+        petCaption.stringValue = L10n.pet
+        sizeCaption.stringValue = L10n.size
+        smallHint.stringValue = L10n.smaller
+        largeHint.stringValue = L10n.larger
+        speechCaption.stringValue = L10n.speech
+        languageCaption.stringValue = L10n.languageLabel
+        toneCaption.stringValue = L10n.toneLabel
+        captionsLabel.stringValue = L10n.captions
+        optionsCaption.stringValue = L10n.options
+        clickThroughLabel.stringValue = L10n.clickThrough
+        perchLabel.stringValue = L10n.perch
+        gravityLabel.stringValue = L10n.gravity
+        soundLabel.stringValue = L10n.sound
+        fillLanguagePopup()
+        fillTonePopup()
+        syncControls()
+    }
+
+    private func fillLanguagePopup() {
+        languagePopup.target = nil
+        defer { languagePopup.target = self }
+        let selected = languagePopup.selectedItem?.representedObject as? String
+        languagePopup.removeAllItems()
+        for language in AppLanguage.allCases {
+            languagePopup.addItem(withTitle: language.menuTitle)
+            languagePopup.lastItem?.representedObject = language.rawValue
+        }
+        if let selected, let index = languagePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == selected }) {
+            languagePopup.selectItem(at: index)
+        }
+    }
+
+    private func fillTonePopup() {
+        tonePopup.target = nil
+        defer { tonePopup.target = self }
+        let selected = tonePopup.selectedItem?.representedObject as? String
+        tonePopup.removeAllItems()
+        for tone in SpeechTone.allCases {
+            tonePopup.addItem(withTitle: tone.menuTitle)
+            tonePopup.lastItem?.representedObject = tone.rawValue
+        }
+        if let selected, let index = tonePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == selected }) {
+            tonePopup.selectItem(at: index)
+        }
     }
 
     private func reloadPets() {
@@ -336,20 +472,20 @@ final class SettingsController: NSObject {
         clickThroughBox.state = owner.clickThroughEnabled ? .on : .off
         captionsBox.state = owner.captionsEnabled ? .on : .off
         perchBox.state = owner.perchEnabled ? .on : .off
+        gravityBox.state = owner.gravityEnabled ? .on : .off
         soundBox.state = owner.soundEnabled ? .on : .off
+        if let index = languagePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == owner.currentLanguage.rawValue }) {
+            languagePopup.selectItem(at: index)
+        }
+        if let index = tonePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == owner.currentTone.rawValue }) {
+            tonePopup.selectItem(at: index)
+        }
     }
 
     private func refreshSizeLabel(_ scale: Double) {
-        let size = DeskPetSettings(
-            petID: "",
-            scale: scale,
-            x: nil,
-            y: nil,
-            clickThrough: true,
-            captions: true,
-            perch: true,
-            sound: true
-        ).displaySize
+        var settings = DeskPetSettings.default
+        settings.scale = scale
+        let size = settings.displaySize
         sizeLabel.stringValue = "\(Int(size.width.rounded()))×\(Int(size.height.rounded()))"
     }
 
@@ -376,7 +512,23 @@ final class SettingsController: NSObject {
         owner?.applyPerch(perchBox.state == .on)
     }
 
+    @objc private func gravityChanged() {
+        owner?.applyGravity(gravityBox.state == .on)
+    }
+
     @objc private func soundChanged() {
         owner?.applySound(soundBox.state == .on)
+    }
+
+    @objc private func languageChanged() {
+        guard let raw = languagePopup.selectedItem?.representedObject as? String,
+              let language = AppLanguage(rawValue: raw) else { return }
+        owner?.applyLanguage(language)
+    }
+
+    @objc private func toneChanged() {
+        guard let raw = tonePopup.selectedItem?.representedObject as? String,
+              let tone = SpeechTone(rawValue: raw) else { return }
+        owner?.applyTone(tone)
     }
 }

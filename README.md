@@ -29,7 +29,7 @@ make stop       # quit
 make uninstall  # quit + remove LaunchAgent, binary, plugin
 ```
 
-Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, window sitting, and alert sound. Waiting changes the menu bar icon; click the pet to jump to the waiting Orca pane or Ghostty/Terminal/iTerm window. Position persists in `~/.codex/pets/deskpet-config.json`.
+Settings live in the menu bar paw. Pick a pet, scale, language, speech tone, click-through, captions, window sitting, gravity, and alert sound. Language defaults to Automatic, which follows macOS preferred languages (Korean, English, Japanese, Simplified/Traditional Chinese). Waiting changes the menu bar icon; click the pet to jump to the waiting Orca pane or Ghostty/Terminal/iTerm window. Position persists in `~/.codex/pets/deskpet-config.json`.
 
 ## How it notices work
 
@@ -39,8 +39,7 @@ Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, w
 4. **Process fallback** — libproc CPU on `opencode` / `codex` / `claude` / `gemini` CLIs and the OpenCode Helper Renderer. Ignores `codex app-server` and `codex-code-mode-host`.
 
 Priority: waiting > running > failed > review > process. Empty pixels click through by default; waiting hops and shows a caption so permission prompts are hard to miss.
-A finished turn still chimes even if another agent is still running.
-Finished turns also post a Notification Center banner, so it still lands if Orca is in front.
+A finished turn keeps its "done" caption for 12 seconds even if another agent is still running, so you can click the pet and jump to that pane. It also chimes and posts a Notification Center banner if Orca is in front.
 
 ## Pets
 
@@ -71,8 +70,9 @@ cd deskpet
 make install
 ```
 
-메뉴바 발바닥 아이콘 → 설정에서 크기와 펫을 바꿉니다. 스프라이트는 포함하지 않습니다. Codex `/pets` 또는 hatch-pet으로 `~/.codex/pets/<이름>/`에 두면 됩니다.
-창에 앉기는 설정에서 켤 수 있습니다. 타이틀바와 창 옆면을 오르고, 끝에 닿으면 돌아섭니다. 승인 대기 중 펫을 클릭하면 Orca 칸 또는 Ghostty/Terminal 창으로 점프합니다.
+메뉴바 발바닥 아이콘 → 설정에서 크기·펫·언어·말투를 바꿉니다. 언어 자동은 macOS 선호 언어 순서(한/영/일/중)를 따릅니다. 스프라이트는 포함하지 않습니다. Codex `/pets` 또는 hatch-pet으로 `~/.codex/pets/<이름>/`에 두면 됩니다.
+창에 앉기와 중력은 따로 켤 수 있습니다. 타이틀바와 창 옆면을 오르고, 중력이 켜져 있으면 끝에서 떨어집니다. 승인 대기 중 펫을 클릭하면 Orca 칸 또는 Ghostty/Terminal 창으로 점프합니다.
+한 작업이 끝나도 다음 작업이 바로 이어지면 '다했어'가 12초 동안 남습니다. 그 말풍선이나 펫을 누르면 끝난 칸으로 갑니다.
 
 OpenCode 플러그인은 앱 재시작 후 적용됩니다.
 Codex 훅은 설치 후 `/hooks`에서 한 번 신뢰해야 이 세션이 펫을 움직입니다.

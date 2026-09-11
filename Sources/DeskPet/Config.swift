@@ -10,7 +10,10 @@ struct DeskPetSettings: Equatable {
     var clickThrough: Bool
     var captions: Bool
     var perch: Bool
+    var gravity: Bool
     var sound: Bool
+    var language: AppLanguage
+    var tone: SpeechTone
 
     static let `default` = DeskPetSettings(
         petID: "sherry",
@@ -20,7 +23,10 @@ struct DeskPetSettings: Equatable {
         clickThrough: true,
         captions: true,
         perch: true,
-        sound: true
+        gravity: true,
+        sound: true,
+        language: .auto,
+        tone: .casual
     )
     static let minScale = 0.35
     static let maxScale = 1.5
@@ -119,6 +125,15 @@ enum ConfigStore {
             if let sound = json["sound"] as? Bool {
                 settings.sound = sound
             }
+            if let gravity = json["gravity"] as? Bool {
+                settings.gravity = gravity
+            }
+            if let raw = json["language"] as? String, let language = AppLanguage(rawValue: raw) {
+                settings.language = language
+            }
+            if let raw = json["tone"] as? String, let tone = SpeechTone(rawValue: raw) {
+                settings.tone = tone
+            }
         } else if let legacy = PositionStore.load() {
             settings.x = legacy.x
             settings.y = legacy.y
@@ -141,7 +156,10 @@ enum ConfigStore {
             "clickThrough": settings.clickThrough,
             "captions": settings.captions,
             "perch": settings.perch,
+            "gravity": settings.gravity,
             "sound": settings.sound,
+            "language": settings.language.rawValue,
+            "tone": settings.tone.rawValue,
         ]
         if let x = settings.x { payload["x"] = x }
         if let y = settings.y { payload["y"] = y }
