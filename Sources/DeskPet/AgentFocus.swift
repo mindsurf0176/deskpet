@@ -12,22 +12,21 @@ enum AgentFocus {
         cwd: String = ""
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let orcaHint = source == "orca"
-                || cwd.hasPrefix(NSHomeDirectory() + "/orca/")
+            let shouldTryOrca = source == "orca"
+                || !cwd.isEmpty
                 || !paneKey.isEmpty || !tabId.isEmpty || !worktreeId.isEmpty
-            var focusedTerminal = false
-            if orcaHint {
-                focusedTerminal = focusOrcaTerminal(
+            var focusedOrca = false
+            if shouldTryOrca {
+                focusedOrca = focusOrcaTerminal(
                     paneKey: paneKey,
                     tabId: tabId,
                     worktreeId: worktreeId,
                     cwd: cwd
                 )
-            } else {
-                focusedTerminal = focusExternalTerminal(cwd: cwd)
             }
+            let focusedTerminal = focusedOrca || focusExternalTerminal(cwd: cwd)
             DispatchQueue.main.async {
-                if focusedTerminal, orcaHint {
+                if focusedOrca {
                     bringApp(source: "orca")
                 } else if !focusedTerminal {
                     bringApp(source: source)
@@ -78,7 +77,6 @@ enum AgentFocus {
         worktreeId: String,
         cwd: String
     ) -> String? {
-        if paneKey.hasPrefix("term_") { return paneKey }
         guard let data = runOrca(["terminal", "list", "--json", "--include-visual-layouts"]),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -96,6 +94,7 @@ enum AgentFocus {
                 term["ptyId"] as? String ?? "",
                 term["cwd"] as? String ?? "",
                 term["path"] as? String ?? "",
+                term["worktreePath"] as? String ?? "",
             ]
             if needles.contains(where: { needle in fields.contains(where: { field in
                 !needle.isEmpty && (field == needle || field.contains(needle) || needle.contains(field))
@@ -107,7 +106,12 @@ enum AgentFocus {
         let wantedCWD = normalize(cwd)
         if !wantedCWD.isEmpty {
             let hits = terminals.filter {
-                let candidate = normalize(($0["cwd"] as? String) ?? ($0["path"] as? String) ?? "")
+                let candidate = normalize(
+                    ($0["cwd"] as? String)
+                    ?? ($0["path"] as? String)
+                    ?? ($0["worktreePath"] as? String)
+                    ?? ""
+                )
                 return candidate == wantedCWD || candidate.hasPrefix(wantedCWD + "/")
             }
             if hits.count == 1, let handle = hits[0]["handle"] as? String, !handle.isEmpty {
