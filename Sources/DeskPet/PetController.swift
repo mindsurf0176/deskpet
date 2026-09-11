@@ -98,7 +98,10 @@ final class PetController: NSObject, NSWindowDelegate {
     private var fallSpeed: CGFloat = 0
     private var lastSurfaceScan: CFTimeInterval = 0
     private var lastEventAt = Date().timeIntervalSince1970
-    private var lastOrcaKinds: [String: ActivityKind] = [:]
+    // Keep the full terminal identity while Orca is reporting a pane. Orca
+    // removes completed entries from last-status.json, so retaining only the
+    // kind would lose the tab/worktree/cwd needed to switch back to that pane.
+    private var lastOrcaStates: [String: PluginState] = [:]
     private var primedCompletions = false
     private var doneFocus: PluginState?
     private var doneUntil: CFTimeInterval = 0
@@ -544,7 +547,7 @@ final class PetController: NSObject, NSWindowDelegate {
             primedCompletions = true
             lastEventAt = now
             for entry in ActivityReader.readOrcaEntries() {
-                lastOrcaKinds[orcaKey(entry)] = entry.kind
+                lastOrcaStates[orcaKey(entry)] = entry
             }
             return
         }
@@ -563,19 +566,31 @@ final class PetController: NSObject, NSWindowDelegate {
         for entry in entries {
             let key = orcaKey(entry)
             seen.insert(key)
-            let previous = lastOrcaKinds[key]
-            lastOrcaKinds[key] = entry.kind
+            let previous = lastOrcaStates[key]?.kind
+            lastOrcaStates[key] = entry
             if (previous == .running || previous == .waiting),
                entry.kind == .review || entry.kind == .idle {
                 pulseDone(entry)
             }
         }
-        for (key, kind) in lastOrcaKinds {
+        for (key, previous) in lastOrcaStates {
             if seen.contains(key) { continue }
-            if kind == .running || kind == .waiting {
-                pulseDone(PluginState(kind: .review, source: "orca", updatedAt: now, paneKey: key))
+            if previous.kind == .running || previous.kind == .waiting {
+                // Keep the last complete identity: the pane may have been
+                // removed from Orca's status registry immediately on finish.
+                pulseDone(PluginState(
+                    kind: .review,
+                    source: previous.source.isEmpty ? "orca" : previous.source,
+                    updatedAt: now,
+                    detail: previous.detail,
+                    paneKey: previous.paneKey.isEmpty ? key : previous.paneKey,
+                    tabId: previous.tabId,
+                    worktreeId: previous.worktreeId,
+                    cwd: previous.cwd,
+                    sessionId: previous.sessionId
+                ))
             }
-            lastOrcaKinds.removeValue(forKey: key)
+            lastOrcaStates.removeValue(forKey: key)
         }
     }
 
