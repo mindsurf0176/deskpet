@@ -1,5 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { mkdirSync, renameSync, writeFileSync } from "fs";
+import { appendFileSync, mkdirSync, renameSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 
@@ -20,6 +20,9 @@ function writeState(state: Kind, extra: Record<string, unknown> = {}) {
     const tmp = join(tmpdir(), `deskpet-state-${process.pid}.json`);
     writeFileSync(tmp, payload);
     renameSync(tmp, PATH);
+    if (state === "waiting" || state === "failed" || state === "review") {
+      appendFileSync(join(DIR, "deskpet-events.jsonl"), payload + "\n");
+    }
   } catch {}
 }
 

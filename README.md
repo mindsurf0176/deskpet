@@ -38,6 +38,7 @@ Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, w
 4. **Process fallback** — libproc CPU on `opencode` / `codex` / `claude` / `gemini` CLIs and the OpenCode Helper Renderer. Ignores `codex app-server` and `codex-code-mode-host`.
 
 Priority: waiting > running > failed > review > process. Empty pixels click through by default; waiting hops and shows a caption so permission prompts are hard to miss.
+A finished turn still chimes even if another agent is still running.
 
 ## Pets
 

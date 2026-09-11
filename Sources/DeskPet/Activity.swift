@@ -11,6 +11,7 @@ struct PluginState: Equatable {
     var tabId: String = ""
     var worktreeId: String = ""
     var cwd: String = ""
+    var sessionId: String = ""
 }
 
 struct ActivitySignal: Equatable {
@@ -61,6 +62,11 @@ enum ActivityReader {
             .appendingPathComponent("Library/Application Support/orca/agent-hooks/last-status.json")
     }
 
+    static var eventsURL: URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".codex/pets/deskpet-events.jsonl")
+    }
+
     static func readPlugin() -> PluginState? {
         guard let data = try? Data(contentsOf: stateURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -88,7 +94,8 @@ enum ActivityReader {
             paneKey: json["paneKey"] as? String ?? "",
             tabId: json["tabId"] as? String ?? "",
             worktreeId: json["worktreeId"] as? String ?? "",
-            cwd: json["cwd"] as? String ?? ""
+            cwd: json["cwd"] as? String ?? "",
+            sessionId: json["sessionId"] as? String ?? ""
         )
     }
 
@@ -97,15 +104,22 @@ enum ActivityReader {
     }
 
     static func readOrca() -> PluginState? {
-        guard let data = try? Data(contentsOf: orcaStatusURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let entries = json["entries"] as? [String: Any]
-        else { return nil }
-
+        let entries = readOrcaEntries()
         let rank: [ActivityKind: Int] = [
             .waiting: 4, .running: 3, .failed: 2, .review: 1, .idle: 0
         ]
-        var best: PluginState?
+        return entries.max {
+            (rank[$0.kind] ?? 0, $0.updatedAt) < (rank[$1.kind] ?? 0, $1.updatedAt)
+        }
+    }
+
+    static func readOrcaEntries() -> [PluginState] {
+        guard let data = try? Data(contentsOf: orcaStatusURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = json["entries"] as? [String: Any]
+        else { return [] }
+
+        var result: [PluginState] = []
         for (key, value) in entries {
             guard let rec = value as? [String: Any] else { continue }
             let payload = rec["payload"] as? [String: Any] ?? [:]
@@ -145,17 +159,49 @@ enum ActivityReader {
                 paneKey: (rec["paneKey"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key,
                 tabId: rec["tabId"] as? String ?? "",
                 worktreeId: rec["worktreeId"] as? String ?? "",
-                cwd: (payload["cwd"] as? String) ?? (rec["cwd"] as? String) ?? ""
+                cwd: (payload["cwd"] as? String) ?? (rec["cwd"] as? String) ?? "",
+                sessionId: rec["sessionId"] as? String ?? ""
             )
-            if let current = best {
-                let betterRank = (rank[kind] ?? 0) > (rank[current.kind] ?? 0)
-                let newerSame = kind == current.kind && updated > current.updatedAt
-                if betterRank || newerSame { best = candidate }
-            } else {
-                best = candidate
-            }
+            result.append(candidate)
         }
-        return best
+        return result
+    }
+
+    static func readEvents(after timestamp: TimeInterval) -> [PluginState] {
+        guard let text = try? String(contentsOf: eventsURL, encoding: .utf8) else { return [] }
+        var out: [PluginState] = []
+        for line in text.split(whereSeparator: \.isNewline) {
+            guard let data = String(line).data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            let raw = (json["state"] as? String ?? "").lowercased()
+            let kind: ActivityKind
+            switch raw {
+            case "waiting", "ask", "permission": kind = .waiting
+            case "failed", "error": kind = .failed
+            case "review", "ready", "done": kind = .review
+            default: continue
+            }
+            var updated: TimeInterval = 0
+            if let n = json["updatedAt"] as? Double {
+                updated = n > 1_000_000_000_000 ? n / 1000 : n
+            }
+            if updated <= timestamp { continue }
+            out.append(
+                PluginState(
+                    kind: kind,
+                    source: json["source"] as? String ?? "codex",
+                    updatedAt: updated,
+                    detail: (json["detail"] as? String) ?? (json["tool"] as? String) ?? "",
+                    paneKey: json["paneKey"] as? String ?? "",
+                    tabId: json["tabId"] as? String ?? "",
+                    worktreeId: json["worktreeId"] as? String ?? "",
+                    cwd: json["cwd"] as? String ?? "",
+                    sessionId: json["sessionId"] as? String ?? ""
+                )
+            )
+        }
+        return out.sorted { $0.updatedAt < $1.updatedAt }
     }
 
     static func resolve(now: TimeInterval, plugin: PluginState?, process: ActivityKind) -> ActivitySignal {
@@ -164,9 +210,7 @@ enum ActivityReader {
         if let state = newest(signals, .running) { return ActivitySignal(state) }
         if let state = newest(signals, .failed) { return ActivitySignal(state) }
         if let state = newest(signals, .review) {
-            return process == .running
-                ? ActivitySignal(kind: .running, source: "process", detail: "")
-                : ActivitySignal(state)
+            return ActivitySignal(state)
         }
         if process == .running {
             return ActivitySignal(kind: .running, source: "process", detail: "")

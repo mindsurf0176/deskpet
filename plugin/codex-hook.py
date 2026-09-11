@@ -11,6 +11,7 @@ from pathlib import Path
 
 DEST_DIR = Path.home() / ".codex" / "pets"
 DEST = DEST_DIR / "deskpet-state.json"
+EVENTS = DEST_DIR / "deskpet-events.jsonl"
 
 RUNNING_EVENTS = {
     "userpromptsubmit",
@@ -97,6 +98,19 @@ def write_state(state: str, extra: dict) -> None:
             os.unlink(tmp)
         except OSError:
             pass
+    if state in {"waiting", "failed", "review"}:
+        append_event(payload)
+
+
+def append_event(payload: dict) -> None:
+    try:
+        if EVENTS.exists() and EVENTS.stat().st_size > 400_000:
+            lines = EVENTS.read_text(encoding="utf-8").splitlines()[-150:]
+            EVENTS.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with EVENTS.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -115,6 +129,18 @@ def main() -> None:
     cwd = data.get("cwd")
     if isinstance(cwd, str) and cwd.strip():
         extra["cwd"] = cwd.strip()
+    session = data.get("session_id") or data.get("sessionId")
+    if isinstance(session, str) and session.strip():
+        extra["sessionId"] = session.strip()
+    pane = os.environ.get("ORCA_PANE_KEY") or data.get("paneKey")
+    if isinstance(pane, str) and pane.strip():
+        extra["paneKey"] = pane.strip()
+    tab = os.environ.get("ORCA_TAB_ID") or data.get("tabId")
+    if isinstance(tab, str) and tab.strip():
+        extra["tabId"] = tab.strip()
+    worktree = os.environ.get("ORCA_WORKTREE_ID") or data.get("worktreeId")
+    if isinstance(worktree, str) and worktree.strip():
+        extra["worktreeId"] = worktree.strip()
     write_state(kind, extra)
 
 

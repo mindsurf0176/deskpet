@@ -93,6 +93,9 @@ final class PetController: NSObject, NSWindowDelegate {
     private var falling = false
     private var fallSpeed: CGFloat = 0
     private var lastSurfaceScan: CFTimeInterval = 0
+    private var lastEventAt = Date().timeIntervalSince1970
+    private var lastOrcaKinds: [String: ActivityKind] = [:]
+    private var primedCompletions = false
 
     var currentPetID: String { settings.petID }
     var currentScale: Double { settings.scale }
@@ -461,6 +464,71 @@ final class PetController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func playAlert(sound name: String) {
+        guard settings.sound, !reducedMotion else { return }
+        if let tone = NSSound(named: NSSound.Name(name)) {
+            tone.play()
+        } else {
+            NSSound(contentsOfFile: "/System/Library/Sounds/\(name).aiff", byReference: true)?.play()
+        }
+    }
+
+    private func consumeCompletions() {
+        let now = Date().timeIntervalSince1970
+        if !primedCompletions {
+            primedCompletions = true
+            lastEventAt = now
+            for entry in ActivityReader.readOrcaEntries() {
+                lastOrcaKinds[orcaKey(entry)] = entry.kind
+            }
+            return
+        }
+        for event in ActivityReader.readEvents(after: lastEventAt) {
+            lastEventAt = max(lastEventAt, event.updatedAt)
+            if event.kind == .review { pulseDone() }
+            if event.kind == .failed, activity != .waiting {
+                playAlert(sound: "Basso")
+                setCaption(L10n.captionFailed)
+                captionUntil = CACurrentMediaTime() + 4
+                play(.failed)
+            }
+        }
+        let entries = ActivityReader.readOrcaEntries()
+        var seen = Set<String>()
+        for entry in entries {
+            let key = orcaKey(entry)
+            seen.insert(key)
+            let previous = lastOrcaKinds[key]
+            lastOrcaKinds[key] = entry.kind
+            if (previous == .running || previous == .waiting),
+               entry.kind == .review || entry.kind == .idle {
+                pulseDone()
+            }
+        }
+        for (key, kind) in lastOrcaKinds {
+            if seen.contains(key) { continue }
+            if kind == .running || kind == .waiting {
+                pulseDone()
+            }
+            lastOrcaKinds.removeValue(forKey: key)
+        }
+    }
+
+    private func orcaKey(_ entry: PluginState) -> String {
+        if !entry.paneKey.isEmpty { return entry.paneKey }
+        if !entry.sessionId.isEmpty { return entry.sessionId }
+        return "\(entry.source)-\(entry.updatedAt)"
+    }
+
+    private func pulseDone() {
+        if !hidden { panel.orderFrontRegardless() }
+        playAlert(sound: "Glass")
+        if activity == .waiting { return }
+        setCaption(L10n.captionReview)
+        captionUntil = CACurrentMediaTime() + 2.8
+        play(.review)
+    }
+
     private func startDisplayLink() {
         let timer = Timer(timeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
             self?.tick()
@@ -508,6 +576,7 @@ final class PetController: NSObject, NSWindowDelegate {
                 plugin: plugin,
                 process: processKind
             ))
+            consumeCompletions()
         }
         if now - lastProcessScan > 3, !scanning {
             lastProcessScan = now
