@@ -805,10 +805,14 @@ final class PetController: NSObject, NSWindowDelegate {
                 let dir: CGFloat = target > current ? 1 : -1
                 var next = current + dir * step
                 if settings.perch, let perch, (next < perch.minAlong - 2 || next > perch.maxAlong - span + 2) {
-                    handleWalkOff(perch: perch, goingMin: next < perch.minAlong)
+                    turnOrStepOff(perch: perch, goingMin: next < perch.minAlong, current: current, minAlong: minAlong, maxAlong: maxAlong)
                     return
                 }
                 next = min(max(next, minAlong), max(minAlong, maxAlong))
+                if abs(next - current) < 0.5, abs(target - current) > step {
+                    wanderTarget = target > current ? minAlong : maxAlong
+                    return
+                }
                 if let perch, settings.perch {
                     panel.setFrameOrigin(perch.origin(chrome: chrome, along: next))
                 } else {
@@ -819,19 +823,21 @@ final class PetController: NSObject, NSWindowDelegate {
         }
         if now >= nextWanderAt {
             guard maxAlong > minAlong else { return }
-            if settings.perch, let perch, Double.random(in: 0...1) < 0.28 {
-                wanderTarget = Bool.random() ? perch.minAlong - span - 6 : perch.maxAlong + 6
-            } else {
-                wanderTarget = CGFloat.random(in: minAlong...maxAlong)
-            }
+            wanderTarget = CGFloat.random(in: minAlong...maxAlong)
         }
     }
 
-    private func handleWalkOff(perch: Surface, goingMin: Bool) {
-        wanderTarget = nil
+    private func turnOrStepOff(
+        perch: Surface,
+        goingMin: Bool,
+        current _: CGFloat,
+        minAlong: CGFloat,
+        maxAlong: CGFloat
+    ) {
         if perch.face == .top {
             let sideFace: Face = goingMin ? .left : .right
             if let side = SurfaceScanner.sibling(ledges, of: perch, face: sideFace) {
+                wanderTarget = nil
                 attach(to: side, along: side.maxAlong)
                 return
             }
@@ -839,19 +845,17 @@ final class PetController: NSObject, NSWindowDelegate {
         if perch.face.isVertical, !goingMin {
             if let top = SurfaceScanner.sibling(ledges, of: perch, face: .top) {
                 let along = perch.face == .left ? top.minAlong : top.maxAlong
+                wanderTarget = nil
                 attach(to: top, along: along)
                 return
             }
         }
-        falling = true
-        fallSpeed = 0.6
-        currentPerch = nil
-        setFacing(.upright)
-        if perch.face == .top {
-            let offX = goingMin
-                ? perch.minAlong - displaySize.width / 2 - 8
-                : perch.maxAlong - displaySize.width / 2 + 8
-            panel.setFrameOrigin(NSPoint(x: offX, y: panel.frame.origin.y))
+        if maxAlong > minAlong {
+            wanderTarget = goingMin ? maxAlong : minAlong
+        } else {
+            wanderTarget = nil
+            play(.idle)
+            nextWanderAt = CACurrentMediaTime() + Double.random(in: 12...28)
         }
     }
 
@@ -900,7 +904,12 @@ final class PetController: NSObject, NSWindowDelegate {
         } else if event.clickCount >= 1 {
             play(.waving)
             if activity == .waiting || activity == .failed {
-                AgentFocus.activate(source: signal.source)
+                AgentFocus.activate(
+                    source: signal.source,
+                    paneKey: signal.paneKey,
+                    tabId: signal.tabId,
+                    worktreeId: signal.worktreeId
+                )
             }
         }
     }

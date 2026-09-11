@@ -7,25 +7,37 @@ struct PluginState: Equatable {
     var source: String
     var updatedAt: TimeInterval
     var detail: String = ""
+    var paneKey: String = ""
+    var tabId: String = ""
+    var worktreeId: String = ""
 }
 
 struct ActivitySignal: Equatable {
     var kind: ActivityKind
     var source: String
     var detail: String
+    var paneKey: String
+    var tabId: String
+    var worktreeId: String
 
-    static let idle = ActivitySignal(kind: .idle, source: "", detail: "")
+    static let idle = ActivitySignal(kind: .idle, source: "", detail: "", paneKey: "", tabId: "", worktreeId: "")
 
-    init(kind: ActivityKind, source: String, detail: String) {
+    init(kind: ActivityKind, source: String, detail: String, paneKey: String = "", tabId: String = "", worktreeId: String = "") {
         self.kind = kind
         self.source = source
         self.detail = detail
+        self.paneKey = paneKey
+        self.tabId = tabId
+        self.worktreeId = worktreeId
     }
 
     init(_ state: PluginState) {
         self.kind = state.kind
         self.source = state.source
         self.detail = state.detail
+        self.paneKey = state.paneKey
+        self.tabId = state.tabId
+        self.worktreeId = state.worktreeId
     }
 }
 
@@ -68,7 +80,10 @@ enum ActivityReader {
             kind: kind,
             source: json["source"] as? String ?? "opencode",
             updatedAt: updated,
-            detail: (json["detail"] as? String) ?? (json["tool"] as? String) ?? ""
+            detail: (json["detail"] as? String) ?? (json["tool"] as? String) ?? "",
+            paneKey: json["paneKey"] as? String ?? "",
+            tabId: json["tabId"] as? String ?? "",
+            worktreeId: json["worktreeId"] as? String ?? ""
         )
     }
 
@@ -86,7 +101,7 @@ enum ActivityReader {
             .waiting: 4, .running: 3, .failed: 2, .review: 1, .idle: 0
         ]
         var best: PluginState?
-        for value in entries.values {
+        for (key, value) in entries {
             guard let rec = value as? [String: Any] else { continue }
             let payload = rec["payload"] as? [String: Any] ?? [:]
             let raw = (payload["state"] as? String ?? "").lowercased()
@@ -121,7 +136,10 @@ enum ActivityReader {
                 kind: kind,
                 source: rec["source"] as? String ?? "orca",
                 updatedAt: updated,
-                detail: payloadTool
+                detail: payloadTool,
+                paneKey: (rec["paneKey"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key,
+                tabId: rec["tabId"] as? String ?? "",
+                worktreeId: rec["worktreeId"] as? String ?? ""
             )
             if let current = best {
                 let betterRank = (rank[kind] ?? 0) > (rank[current.kind] ?? 0)
