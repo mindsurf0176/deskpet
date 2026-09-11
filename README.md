@@ -39,6 +39,7 @@ Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, w
 
 Priority: waiting > running > failed > review > process. Empty pixels click through by default; waiting hops and shows a caption so permission prompts are hard to miss.
 A finished turn still chimes even if another agent is still running.
+Finished turns also post a Notification Center banner, so it still lands if Orca is in front.
 
 ## Pets
 

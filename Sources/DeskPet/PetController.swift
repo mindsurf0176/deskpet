@@ -132,6 +132,7 @@ final class PetController: NSObject, NSWindowDelegate {
         if !hidden { panel.orderFrontRegardless() }
         startDisplayLink()
         startClickThrough()
+        DoneNotify.shared.start()
     }
 
     func applicationWillTerminate() {
@@ -485,7 +486,7 @@ final class PetController: NSObject, NSWindowDelegate {
         }
         for event in ActivityReader.readEvents(after: lastEventAt) {
             lastEventAt = max(lastEventAt, event.updatedAt)
-            if event.kind == .review { pulseDone() }
+            if event.kind == .review { pulseDone(event) }
             if event.kind == .failed, activity != .waiting {
                 playAlert(sound: "Basso")
                 setCaption(L10n.captionFailed)
@@ -502,13 +503,13 @@ final class PetController: NSObject, NSWindowDelegate {
             lastOrcaKinds[key] = entry.kind
             if (previous == .running || previous == .waiting),
                entry.kind == .review || entry.kind == .idle {
-                pulseDone()
+                pulseDone(entry)
             }
         }
         for (key, kind) in lastOrcaKinds {
             if seen.contains(key) { continue }
             if kind == .running || kind == .waiting {
-                pulseDone()
+                pulseDone(PluginState(kind: .review, source: "orca", updatedAt: now, paneKey: key))
             }
             lastOrcaKinds.removeValue(forKey: key)
         }
@@ -520,9 +521,10 @@ final class PetController: NSObject, NSWindowDelegate {
         return "\(entry.source)-\(entry.updatedAt)"
     }
 
-    private func pulseDone() {
+    private func pulseDone(_ event: PluginState) {
         if !hidden { panel.orderFrontRegardless() }
         playAlert(sound: "Glass")
+        DoneNotify.shared.finished(event)
         if activity == .waiting { return }
         setCaption(L10n.captionReview)
         captionUntil = CACurrentMediaTime() + 2.8

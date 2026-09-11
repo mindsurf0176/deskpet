@@ -28,6 +28,7 @@ enum L10n {
     static var captionWaiting: String { t("Needs you", ko: "허락해줘") }
     static var captionFailed: String { t("Ouch", ko: "앗") }
     static var captionReview: String { t("Done", ko: "끝") }
+    static var doneNotify: String { t("A turn finished.", ko: "작업이 끝났어") }
     static var working: String { t("Working", ko: "작업 중") }
 
     static func tool(_ raw: String) -> String {
