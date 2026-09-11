@@ -10,6 +10,7 @@ struct PluginState: Equatable {
     var paneKey: String = ""
     var tabId: String = ""
     var worktreeId: String = ""
+    var cwd: String = ""
 }
 
 struct ActivitySignal: Equatable {
@@ -19,16 +20,18 @@ struct ActivitySignal: Equatable {
     var paneKey: String
     var tabId: String
     var worktreeId: String
+    var cwd: String
 
-    static let idle = ActivitySignal(kind: .idle, source: "", detail: "", paneKey: "", tabId: "", worktreeId: "")
+    static let idle = ActivitySignal(kind: .idle, source: "", detail: "", paneKey: "", tabId: "", worktreeId: "", cwd: "")
 
-    init(kind: ActivityKind, source: String, detail: String, paneKey: String = "", tabId: String = "", worktreeId: String = "") {
+    init(kind: ActivityKind, source: String, detail: String, paneKey: String = "", tabId: String = "", worktreeId: String = "", cwd: String = "") {
         self.kind = kind
         self.source = source
         self.detail = detail
         self.paneKey = paneKey
         self.tabId = tabId
         self.worktreeId = worktreeId
+        self.cwd = cwd
     }
 
     init(_ state: PluginState) {
@@ -38,6 +41,7 @@ struct ActivitySignal: Equatable {
         self.paneKey = state.paneKey
         self.tabId = state.tabId
         self.worktreeId = state.worktreeId
+        self.cwd = state.cwd
     }
 }
 
@@ -83,7 +87,8 @@ enum ActivityReader {
             detail: (json["detail"] as? String) ?? (json["tool"] as? String) ?? "",
             paneKey: json["paneKey"] as? String ?? "",
             tabId: json["tabId"] as? String ?? "",
-            worktreeId: json["worktreeId"] as? String ?? ""
+            worktreeId: json["worktreeId"] as? String ?? "",
+            cwd: json["cwd"] as? String ?? ""
         )
     }
 
@@ -139,7 +144,8 @@ enum ActivityReader {
                 detail: payloadTool,
                 paneKey: (rec["paneKey"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key,
                 tabId: rec["tabId"] as? String ?? "",
-                worktreeId: rec["worktreeId"] as? String ?? ""
+                worktreeId: rec["worktreeId"] as? String ?? "",
+                cwd: (payload["cwd"] as? String) ?? (rec["cwd"] as? String) ?? ""
             )
             if let current = best {
                 let betterRank = (rank[kind] ?? 0) > (rank[current.kind] ?? 0)

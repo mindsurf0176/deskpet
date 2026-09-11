@@ -28,7 +28,7 @@ make stop       # quit
 make uninstall  # quit + remove LaunchAgent, binary, plugin
 ```
 
-Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, window sitting, and alert sound. Waiting changes the menu bar icon; click the pet to jump to the waiting Orca pane when it can. Position persists in `~/.codex/pets/deskpet-config.json`.
+Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, window sitting, and alert sound. Waiting changes the menu bar icon; click the pet to jump to the waiting Orca pane or Ghostty/Terminal/iTerm window. Position persists in `~/.codex/pets/deskpet-config.json`.
 
 ## How it notices work
 
@@ -69,7 +69,7 @@ make install
 ```
 
 메뉴바 발바닥 아이콘 → 설정에서 크기와 펫을 바꿉니다. 스프라이트는 포함하지 않습니다. Codex `/pets` 또는 hatch-pet으로 `~/.codex/pets/<이름>/`에 두면 됩니다.
-창에 앉기는 설정에서 켤 수 있습니다. 타이틀바와 창 옆면을 오르고, 끝에 닿으면 돌아섭니다. 승인 대기 중 펫을 클릭하면 Orca면 그 칸으로 점프합니다.
+창에 앉기는 설정에서 켤 수 있습니다. 타이틀바와 창 옆면을 오르고, 끝에 닿으면 돌아섭니다. 승인 대기 중 펫을 클릭하면 Orca 칸 또는 Ghostty/Terminal 창으로 점프합니다.
 
 OpenCode 플러그인은 앱 재시작 후 적용됩니다.
 Codex 훅은 설치 후 `/hooks`에서 한 번 신뢰해야 이 세션이 펫을 움직입니다.

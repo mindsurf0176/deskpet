@@ -112,6 +112,9 @@ def main() -> None:
         extra["tool"] = tool
     if detail:
         extra["detail"] = detail
+    cwd = data.get("cwd")
+    if isinstance(cwd, str) and cwd.strip():
+        extra["cwd"] = cwd.strip()
     write_state(kind, extra)
 
 
@@ -120,4 +123,3 @@ if __name__ == "__main__":
         main()
     except Exception:
         pass
-

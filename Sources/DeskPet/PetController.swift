@@ -908,7 +908,8 @@ final class PetController: NSObject, NSWindowDelegate {
                     source: signal.source,
                     paneKey: signal.paneKey,
                     tabId: signal.tabId,
-                    worktreeId: signal.worktreeId
+                    worktreeId: signal.worktreeId,
+                    cwd: signal.cwd
                 )
             }
         }
