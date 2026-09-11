@@ -23,7 +23,7 @@ final class SettingsController: NSObject {
         self.owner = owner
         self.panel = SettingsPanel(
             contentRect: NSRect(x: 0, y: 0, width: 280, height: 320),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -37,14 +37,11 @@ final class SettingsController: NSObject {
         reloadPets()
         syncControls()
         place(anchor: anchor)
-        panel.alphaValue = 0
+        NSApp.activate(ignoringOtherApps: true)
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.installDismissMonitor()
         }
     }
@@ -112,7 +109,7 @@ final class SettingsController: NSObject {
         panel.hasShadow = true
         panel.isFloatingPanel = true
         panel.level = .floating
-        panel.hidesOnDeactivate = true
+        panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
