@@ -7,7 +7,17 @@ struct DeskPetSettings: Equatable {
     var x: Double?
     var y: Double?
 
-    static let `default` = DeskPetSettings(petID: "sherry", scale: 0.5, x: nil, y: nil)
+    var clickThrough: Bool
+    var captions: Bool
+
+    static let `default` = DeskPetSettings(
+        petID: "sherry",
+        scale: 0.5,
+        x: nil,
+        y: nil,
+        clickThrough: true,
+        captions: true
+    )
     static let minScale = 0.35
     static let maxScale = 1.5
 
@@ -93,6 +103,12 @@ enum ConfigStore {
                 settings.x = x
                 settings.y = y
             }
+            if let clickThrough = json["clickThrough"] as? Bool {
+                settings.clickThrough = clickThrough
+            }
+            if let captions = json["captions"] as? Bool {
+                settings.captions = captions
+            }
         } else if let legacy = PositionStore.load() {
             settings.x = legacy.x
             settings.y = legacy.y
@@ -112,6 +128,8 @@ enum ConfigStore {
         var payload: [String: Any] = [
             "petID": settings.petID,
             "scale": settings.clampedScale,
+            "clickThrough": settings.clickThrough,
+            "captions": settings.captions,
         ]
         if let x = settings.x { payload["x"] = x }
         if let y = settings.y { payload["y"] = y }

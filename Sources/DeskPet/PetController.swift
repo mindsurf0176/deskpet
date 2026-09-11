@@ -6,6 +6,7 @@ final class PetView: NSView {
     var state: PetState = .idle
     var frameIndex = 0
     var reducedMotion = false
+    private var currentImage: CGImage?
 
     init(atlas: SpriteAtlas) {
         self.atlas = atlas
@@ -27,7 +28,15 @@ final class PetView: NSView {
         let image = reducedMotion
             ? atlas.image(state: .idle, frame: 0)
             : atlas.image(state: state, frame: frameIndex)
+        currentImage = image
         layer?.contents = image
+    }
+
+    func opaque(at point: NSPoint, slop: CGFloat) -> Bool {
+        guard let image = currentImage else {
+            return bounds.insetBy(dx: -slop, dy: -slop).contains(point)
+        }
+        return PixelHit.opaque(image, at: point, in: bounds.size, slop: slop)
     }
 }
 
@@ -38,12 +47,15 @@ final class PetPanel: NSPanel {
 
 final class PetController: NSObject, NSWindowDelegate {
     private var atlas: SpriteAtlas
+    private let chrome = NSView()
     private let view: PetView
+    private let captionView = CaptionView()
     private let panel: PetPanel
     private var statusItem: NSStatusItem?
     private var hideMenuItem: NSMenuItem?
     private var timer: Timer?
     private var activity = ActivityKind.idle
+    private var signal = ActivitySignal.idle
     private var oneshot: PetState?
     private var dragging = false
     private var dragStart = NSPoint.zero
@@ -64,9 +76,17 @@ final class PetController: NSObject, NSWindowDelegate {
     private var settings: DeskPetSettings
     private var settingsController: SettingsController?
     private let reducedMotion: Bool
+    private var localMoveMonitor: Any?
+    private var globalMoveMonitor: Any?
+    private var captionUntil: CFTimeInterval = 0
+    private var hopping = false
+    private var hopStart: CFTimeInterval = 0
+    private var hopBaseY: CGFloat = 0
 
     var currentPetID: String { settings.petID }
     var currentScale: Double { settings.scale }
+    var clickThroughEnabled: Bool { settings.clickThrough }
+    var captionsEnabled: Bool { settings.captions }
     private var displaySize: NSSize { settings.displaySize }
 
     init(atlas: SpriteAtlas, settings: DeskPetSettings) {
@@ -84,8 +104,7 @@ final class PetController: NSObject, NSWindowDelegate {
         super.init()
         configurePanel()
         configureStatusItem()
-        view.frame = NSRect(origin: .zero, size: displaySize)
-        panel.contentView = view
+        layoutChrome()
         restorePosition()
         settingsController = SettingsController(owner: self)
         nextWanderAt = CACurrentMediaTime() + 8
@@ -95,12 +114,19 @@ final class PetController: NSObject, NSWindowDelegate {
     func start() {
         if !hidden { panel.orderFrontRegardless() }
         startDisplayLink()
+        startClickThrough()
     }
 
     func applicationWillTerminate() {
         persistWork?.cancel()
         persist()
         timer?.invalidate()
+        if let localMoveMonitor {
+            NSEvent.removeMonitor(localMoveMonitor)
+        }
+        if let globalMoveMonitor {
+            NSEvent.removeMonitor(globalMoveMonitor)
+        }
     }
 
     private func configurePanel() {
@@ -113,9 +139,35 @@ final class PetController: NSObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = false
         panel.ignoresMouseEvents = false
         panel.delegate = self
-        panel.acceptsMouseMovedEvents = false
+        panel.acceptsMouseMovedEvents = true
         panel.isExcludedFromWindowsMenu = true
         panel.title = "DeskPet"
+
+        chrome.wantsLayer = true
+        chrome.layer?.backgroundColor = NSColor.clear.cgColor
+        chrome.autoresizingMask = [.width, .height]
+        panel.contentView = chrome
+        chrome.addSubview(view)
+        chrome.addSubview(captionView)
+        captionView.isHidden = true
+    }
+
+    private func layoutChrome() {
+        let pet = displaySize
+        let showCaption = !captionView.isHidden
+        let captionHeight: CGFloat = showCaption ? 26 : 0
+        let gap: CGFloat = showCaption ? 6 : 0
+        let size = NSSize(width: pet.width, height: pet.height + captionHeight + gap)
+        let origin = panel.frame.origin
+        view.frame = NSRect(origin: .zero, size: pet)
+        captionView.frame = NSRect(
+            x: 6,
+            y: pet.height + gap,
+            width: max(24, pet.width - 12),
+            height: captionHeight
+        )
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        chrome.frame = NSRect(origin: .zero, size: size)
     }
 
     private func configureStatusItem() {
@@ -156,6 +208,7 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func savePosition() {
+        if hopping { return }
         lastSavedOrigin = panel.frame.origin
         settings.x = panel.frame.origin.x
         settings.y = panel.frame.origin.y
@@ -168,8 +221,10 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func persist() {
-        settings.x = panel.frame.origin.x
-        settings.y = panel.frame.origin.y
+        if !hopping {
+            settings.x = panel.frame.origin.x
+            settings.y = panel.frame.origin.y
+        }
         ConfigStore.save(settings)
     }
 
@@ -204,10 +259,22 @@ final class PetController: NSObject, NSWindowDelegate {
             origin.x = min(max(origin.x, screen.minX + 8), screen.maxX - size.width - 8)
             origin.y = min(max(origin.y, screen.minY + 8), screen.maxY - size.height - 8)
         }
-        view.frame = NSRect(origin: .zero, size: size)
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        panel.setFrameOrigin(origin)
+        layoutChrome()
         persist()
         view.present()
+    }
+
+    func applyClickThrough(_ on: Bool) {
+        settings.clickThrough = on
+        persist()
+        updateClickThrough(at: NSEvent.mouseLocation)
+    }
+
+    func applyCaptions(_ on: Bool) {
+        settings.captions = on
+        persist()
+        refreshCaption(from: signal, force: true)
     }
 
     @objc private func openSettings() {
@@ -240,15 +307,18 @@ final class PetController: NSObject, NSWindowDelegate {
             panel.orderFrontRegardless()
         }
         refreshHideTitle()
+        updateClickThrough(at: NSEvent.mouseLocation)
     }
 
     @objc private func resetPosition() {
         hidden = false
+        hopping = false
         panel.orderFrontRegardless()
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         panel.setFrameOrigin(NSPoint(x: screen.maxX - displaySize.width - 28, y: screen.minY + 28))
         savePosition()
         refreshHideTitle()
+        updateClickThrough(at: NSEvent.mouseLocation)
     }
 
     @objc private func quit() {
@@ -262,7 +332,15 @@ final class PetController: NSObject, NSWindowDelegate {
 
     private func refreshTooltip() {
         let name = PetCatalog.item(id: settings.petID)?.displayName ?? settings.petID
-        statusItem?.button?.toolTip = name
+        let suffix: String
+        switch activity {
+        case .waiting: suffix = L10n.captionWaiting
+        case .failed: suffix = L10n.captionFailed
+        case .running: suffix = L10n.working
+        case .review: suffix = L10n.captionReview
+        case .idle: suffix = ""
+        }
+        statusItem?.button?.toolTip = suffix.isEmpty ? name : "\(name) · \(suffix)"
     }
 
     private func startDisplayLink() {
@@ -271,6 +349,35 @@ final class PetController: NSObject, NSWindowDelegate {
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+    }
+
+    private func startClickThrough() {
+        localMoveMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
+            self?.updateClickThrough(at: NSEvent.mouseLocation)
+            return event
+        }
+        globalMoveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+            self?.updateClickThrough(at: NSEvent.mouseLocation)
+        }
+        updateClickThrough(at: NSEvent.mouseLocation)
+    }
+
+    private func updateClickThrough(at screenPoint: NSPoint) {
+        guard settings.clickThrough, !dragging, !hidden else {
+            panel.ignoresMouseEvents = false
+            return
+        }
+        if activity == .waiting {
+            panel.ignoresMouseEvents = false
+            return
+        }
+        let windowPoint = panel.convertPoint(fromScreen: screenPoint)
+        if !captionView.isHidden, captionView.frame.insetBy(dx: -4, dy: -4).contains(windowPoint) {
+            panel.ignoresMouseEvents = false
+            return
+        }
+        let petPoint = view.convert(windowPoint, from: nil)
+        panel.ignoresMouseEvents = !view.opaque(at: petPoint, slop: 6)
     }
 
     private func tick() {
@@ -296,21 +403,36 @@ final class PetController: NSObject, NSWindowDelegate {
                 }
             }
         }
+        expireCaption(now: now)
+        stepHop(now: now)
         advanceFrame(now: now)
         stepWander(now: now)
-        if hypot(panel.frame.origin.x - lastSavedOrigin.x, panel.frame.origin.y - lastSavedOrigin.y) > 12 {
+        if !hopping, hypot(panel.frame.origin.x - lastSavedOrigin.x, panel.frame.origin.y - lastSavedOrigin.y) > 12 {
             savePosition()
         }
     }
 
-    private func applyActivity(_ next: ActivityKind) {
-        guard next != activity else { return }
-        let previous = activity
-        activity = next
+    private func applyActivity(_ next: ActivitySignal) {
+        let previousKind = activity
+        let detailChanged = next.detail != signal.detail || next.kind != signal.kind
+        signal = next
+        if detailChanged {
+            refreshCaption(from: next)
+        }
+        if next.kind == .waiting, previousKind != .waiting, !hidden {
+            startHop()
+            panel.orderFrontRegardless()
+        }
+        guard next.kind != activity else {
+            if detailChanged { refreshTooltip() }
+            return
+        }
+        activity = next.kind
+        refreshTooltip()
         if dragging { return }
-        switch next {
+        switch next.kind {
         case .running:
-            if previous == .idle || previous == .review {
+            if previousKind == .idle || previousKind == .review {
                 play(.jumping)
             } else {
                 play(.running)
@@ -328,6 +450,71 @@ final class PetController: NSObject, NSWindowDelegate {
         case .idle:
             play(.idle)
         }
+    }
+
+    private func refreshCaption(from next: ActivitySignal, force: Bool = false) {
+        guard settings.captions, !reducedMotion else {
+            setCaption("")
+            return
+        }
+        let now = CACurrentMediaTime()
+        switch next.kind {
+        case .waiting:
+            setCaption(L10n.captionWaiting)
+            captionUntil = .greatestFiniteMagnitude
+        case .failed:
+            setCaption(L10n.captionFailed)
+            captionUntil = now + 4
+        case .review:
+            setCaption(L10n.captionReview)
+            captionUntil = now + 2.4
+        case .running:
+            let label = L10n.tool(next.detail)
+            if !label.isEmpty {
+                setCaption(label)
+                captionUntil = now + 1.8
+            } else if force {
+                setCaption("")
+            }
+        case .idle:
+            setCaption("")
+            captionUntil = now
+        }
+    }
+
+    private func expireCaption(now: CFTimeInterval) {
+        guard !captionView.isHidden, now >= captionUntil else { return }
+        if activity == .waiting { return }
+        setCaption("")
+    }
+
+    private func setCaption(_ text: String) {
+        let hide = text.isEmpty
+        if captionView.text == text, captionView.isHidden == hide { return }
+        captionView.text = text
+        captionView.isHidden = hide
+        layoutChrome()
+    }
+
+    private func startHop() {
+        guard !reducedMotion, !dragging else { return }
+        hopping = true
+        hopStart = CACurrentMediaTime()
+        hopBaseY = panel.frame.origin.y
+    }
+
+    private func stepHop(now: CFTimeInterval) {
+        guard hopping else { return }
+        let duration = 0.9
+        let t = now - hopStart
+        if t >= duration {
+            hopping = false
+            panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: hopBaseY))
+            return
+        }
+        let decay = 1 - t / duration
+        let y = hopBaseY + abs(sin(t / duration * .pi * 3)) * 16 * decay
+        panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: y))
     }
 
     private func advanceFrame(now: CFTimeInterval) {
@@ -379,7 +566,7 @@ final class PetController: NSObject, NSWindowDelegate {
     }
 
     private func stepWander(now: CFTimeInterval) {
-        guard !reducedMotion, !dragging, !hidden, activity == .idle, oneshot == nil else { return }
+        guard !reducedMotion, !dragging, !hidden, !hopping, activity == .idle, oneshot == nil else { return }
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         if now - lastWanderStep < 0.09 { return }
         lastWanderStep = now
@@ -412,6 +599,7 @@ final class PetController: NSObject, NSWindowDelegate {
         dragStart = NSEvent.mouseLocation
         windowStart = panel.frame.origin
         lastDragX = windowStart.x
+        hopping = false
         _ = event
     }
 
@@ -423,6 +611,8 @@ final class PetController: NSObject, NSWindowDelegate {
             dragging = true
             wanderTarget = nil
             oneshot = nil
+            hopping = false
+            panel.ignoresMouseEvents = false
         }
         guard dragging else { return }
         lastDragX = panel.frame.origin.x
@@ -437,6 +627,7 @@ final class PetController: NSObject, NSWindowDelegate {
             dragging = false
             savePosition()
             play(displayState())
+            updateClickThrough(at: NSEvent.mouseLocation)
         } else if event.clickCount >= 1 {
             play(.waving)
         }
@@ -449,7 +640,7 @@ final class PetController: NSObject, NSWindowDelegate {
 
 extension PetController {
     func attachMouse() {
-        view.window?.acceptsMouseMovedEvents = false
+        view.window?.acceptsMouseMovedEvents = true
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp]) { [weak self] event in
             guard let self, event.window == self.panel else { return event }
             switch event.type {

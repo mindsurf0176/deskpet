@@ -11,6 +11,8 @@ final class SettingsController: NSObject {
     private let slider = NSSlider()
     private let sizeLabel = NSTextField(labelWithString: "")
     private weak var owner: PetController?
+    private var clickThroughBox: NSButton!
+    private var captionsBox: NSButton!
 
     init(owner: PetController) {
         self.owner = owner
@@ -84,6 +86,15 @@ final class SettingsController: NSObject {
         slider.target = self
         slider.action = #selector(scaleChanged)
 
+        let clickThrough = NSButton(checkboxWithTitle: L10n.clickThrough, target: self, action: #selector(clickThroughChanged))
+        clickThrough.translatesAutoresizingMaskIntoConstraints = false
+        clickThrough.font = .systemFont(ofSize: 12)
+        let captions = NSButton(checkboxWithTitle: L10n.captions, target: self, action: #selector(captionsChanged))
+        captions.translatesAutoresizingMaskIntoConstraints = false
+        captions.font = .systemFont(ofSize: 12)
+        self.clickThroughBox = clickThrough
+        self.captionsBox = captions
+
         let ends = NSView()
         ends.translatesAutoresizingMaskIntoConstraints = false
         let small = hint(L10n.smaller)
@@ -97,6 +108,8 @@ final class SettingsController: NSObject {
         root.addSubview(sizeRow)
         root.addSubview(slider)
         root.addSubview(ends)
+        root.addSubview(clickThrough)
+        root.addSubview(captions)
 
         NSLayoutConstraint.activate([
             petCaption.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
@@ -125,15 +138,23 @@ final class SettingsController: NSObject {
             ends.topAnchor.constraint(equalTo: slider.bottomAnchor, constant: 2),
             ends.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
             ends.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            ends.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
             ends.heightAnchor.constraint(equalToConstant: 16),
 
             small.leadingAnchor.constraint(equalTo: ends.leadingAnchor),
             small.centerYAnchor.constraint(equalTo: ends.centerYAnchor),
             large.trailingAnchor.constraint(equalTo: ends.trailingAnchor),
             large.centerYAnchor.constraint(equalTo: ends.centerYAnchor),
+
+            clickThrough.topAnchor.constraint(equalTo: ends.bottomAnchor, constant: 14),
+            clickThrough.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            clickThrough.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+
+            captions.topAnchor.constraint(equalTo: clickThrough.bottomAnchor, constant: 6),
+            captions.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            captions.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            captions.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
         ])
-        panel.setContentSize(NSSize(width: 300, height: 168))
+        panel.setContentSize(NSSize(width: 300, height: 236))
     }
 
     private func caption(_ text: String) -> NSTextField {
@@ -175,10 +196,12 @@ final class SettingsController: NSObject {
         }
         slider.doubleValue = owner.currentScale
         refreshSizeLabel(owner.currentScale)
+        clickThroughBox.state = owner.clickThroughEnabled ? .on : .off
+        captionsBox.state = owner.captionsEnabled ? .on : .off
     }
 
     private func refreshSizeLabel(_ scale: Double) {
-        let size = DeskPetSettings(petID: "", scale: scale, x: nil, y: nil).displaySize
+        let size = DeskPetSettings(petID: "", scale: scale, x: nil, y: nil, clickThrough: true, captions: true).displaySize
         sizeLabel.stringValue = "\(Int(size.width.rounded()))×\(Int(size.height.rounded()))"
     }
 
@@ -192,6 +215,12 @@ final class SettingsController: NSObject {
         refreshSizeLabel(scale)
         owner?.applyScale(scale)
     }
+
+    @objc private func clickThroughChanged() {
+        owner?.applyClickThrough(clickThroughBox.state == .on)
+    }
+
+    @objc private func captionsChanged() {
+        owner?.applyCaptions(captionsBox.state == .on)
+    }
 }
-
-

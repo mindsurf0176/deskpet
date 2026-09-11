@@ -6,6 +6,27 @@ struct PluginState: Equatable {
     var kind: ActivityKind
     var source: String
     var updatedAt: TimeInterval
+    var detail: String = ""
+}
+
+struct ActivitySignal: Equatable {
+    var kind: ActivityKind
+    var source: String
+    var detail: String
+
+    static let idle = ActivitySignal(kind: .idle, source: "", detail: "")
+
+    init(kind: ActivityKind, source: String, detail: String) {
+        self.kind = kind
+        self.source = source
+        self.detail = detail
+    }
+
+    init(_ state: PluginState) {
+        self.kind = state.kind
+        self.source = state.source
+        self.detail = state.detail
+    }
 }
 
 enum ActivityReader {
@@ -46,7 +67,8 @@ enum ActivityReader {
         return PluginState(
             kind: kind,
             source: json["source"] as? String ?? "opencode",
-            updatedAt: updated
+            updatedAt: updated,
+            detail: (json["detail"] as? String) ?? (json["tool"] as? String) ?? ""
         )
     }
 
@@ -94,7 +116,13 @@ enum ActivityReader {
             if let n = rec["receivedAt"] as? Double {
                 updated = n > 1_000_000_000_000 ? n / 1000 : n
             }
-            let candidate = PluginState(kind: kind, source: rec["source"] as? String ?? "orca", updatedAt: updated)
+            let payloadTool = (payload["detail"] as? String) ?? (payload["tool"] as? String) ?? ""
+            let candidate = PluginState(
+                kind: kind,
+                source: rec["source"] as? String ?? "orca",
+                updatedAt: updated,
+                detail: payloadTool
+            )
             if let current = best {
                 let betterRank = (rank[kind] ?? 0) > (rank[current.kind] ?? 0)
                 let newerSame = kind == current.kind && updated > current.updatedAt
@@ -106,17 +134,21 @@ enum ActivityReader {
         return best
     }
 
-    static func resolve(now: TimeInterval, plugin: PluginState?, process: ActivityKind) -> ActivityKind {
+    static func resolve(now: TimeInterval, plugin: PluginState?, process: ActivityKind) -> ActivitySignal {
         let signals = [plugin, readOrca()].compactMap { $0 }.filter { isFresh($0, now: now) }
-        if signals.contains(where: { $0.kind == .waiting }) { return .waiting }
-        if signals.contains(where: { $0.kind == .running }) { return .running }
-        if signals.contains(where: { $0.kind == .failed }) { return .failed }
-        if signals.contains(where: { $0.kind == .review }) {
-            return process == .running ? .running : .review
+        if let state = newest(signals, .waiting) { return ActivitySignal(state) }
+        if let state = newest(signals, .running) { return ActivitySignal(state) }
+        if let state = newest(signals, .failed) { return ActivitySignal(state) }
+        if let state = newest(signals, .review) {
+            return process == .running
+                ? ActivitySignal(kind: .running, source: "process", detail: "")
+                : ActivitySignal(state)
         }
-        if process == .running { return .running }
-        if signals.contains(where: { $0.kind == .idle }) { return .idle }
-        return process
+        if process == .running {
+            return ActivitySignal(kind: .running, source: "process", detail: "")
+        }
+        if let state = newest(signals, .idle) { return ActivitySignal(state) }
+        return .idle
     }
 
     private static func isFresh(_ state: PluginState, now: TimeInterval) -> Bool {
@@ -124,12 +156,16 @@ enum ActivityReader {
         if age < 0 { return false }
         let orca = state.source != "opencode"
         switch state.kind {
-        case .running: return age < (orca ? 180 : 12)
-        case .waiting: return age < (orca ? 120 : 12)
-        case .failed: return age < 6
-        case .review: return age < 10
+        case .running: return age < (orca ? 180 : 20)
+        case .waiting: return age < 900
+        case .failed: return age < 8
+        case .review: return age < 12
         case .idle: return age < 12
         }
+    }
+
+    private static func newest(_ signals: [PluginState], _ kind: ActivityKind) -> PluginState? {
+        signals.filter { $0.kind == kind }.max { $0.updatedAt < $1.updatedAt }
     }
 
 }

@@ -8,8 +8,10 @@ LABEL := ai.deskpet
 OLD_LABEL := ai.minseo.deskpet
 UID := $(shell id -u)
 LOG := $(HOME)/.codex/pets/deskpet.log
+HOOK_SRC := $(PREFIX)/plugin/codex-hook.py
+HOOK_INSTALL := $(PREFIX)/scripts/install-codex-hook.py
 
-.PHONY: build install run stop unload uninstall plugin
+.PHONY: build install run stop unload uninstall plugin hook
 
 build:
 	swift build -c release --package-path $(PREFIX)
@@ -17,6 +19,9 @@ build:
 plugin:
 	mkdir -p $(dir $(PLUGIN))
 	cp $(PREFIX)/plugin/deskpet.ts $(PLUGIN)
+
+hook:
+	python3 $(HOOK_INSTALL) $(HOOK_SRC)
 
 $(BIN): build
 	mkdir -p $(BINDIR)
@@ -37,11 +42,12 @@ $(PLIST): $(BIN)
 	'<key>StandardErrorPath</key><string>$(LOG)</string>' \
 	'</dict></plist>' > $(PLIST)
 
-install: $(BIN) plugin $(PLIST)
+install: $(BIN) plugin hook $(PLIST)
 	launchctl bootout gui/$(UID)/$(OLD_LABEL) 2>/dev/null || true
 	rm -f $(HOME)/Library/LaunchAgents/$(OLD_LABEL).plist
 	launchctl bootout gui/$(UID)/$(LABEL) 2>/dev/null || true
-	launchctl bootstrap gui/$(UID) $(PLIST)
+	sleep 0.4
+	launchctl bootstrap gui/$(UID) $(PLIST) 2>/dev/null || true
 	launchctl enable gui/$(UID)/$(LABEL)
 	launchctl kickstart -k gui/$(UID)/$(LABEL)
 
@@ -58,3 +64,4 @@ unload: stop
 
 uninstall: unload
 	rm -f $(BIN) $(PLUGIN)
+	python3 $(HOOK_INSTALL) --uninstall

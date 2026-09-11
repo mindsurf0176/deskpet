@@ -46,7 +46,7 @@ export const DeskPetPlugin: Plugin = async () => {
       const props = eventProps(event);
       const status = String(props.status ?? props.state ?? "").toLowerCase();
       if (type.includes("permission.asked") || type.includes("permission.ask")) {
-        writeState("waiting", { type });
+        writeState("waiting", { type, detail: "permission" });
         return;
       }
       if (type.includes("permission.replied") || type.includes("permission.reply")) {
@@ -54,7 +54,7 @@ export const DeskPetPlugin: Plugin = async () => {
         return;
       }
       if (type.includes("session.error") || status.includes("error") || status.includes("fail")) {
-        writeState("failed", { type, status });
+        writeState("failed", { type, status, detail: "error" });
         return;
       }
       if (type.includes("session.idle") || status === "idle" || status === "done") {
@@ -77,10 +77,10 @@ export const DeskPetPlugin: Plugin = async () => {
       writeState("running");
     },
     "permission.ask": async () => {
-      writeState("waiting");
+      writeState("waiting", { detail: "permission" });
     },
     "tool.execute.before": async (input) => {
-      writeState("running", { tool: input.tool });
+      writeState("running", { tool: input.tool, detail: input.tool });
     },
     "tool.execute.after": async () => {
       writeState("running");
