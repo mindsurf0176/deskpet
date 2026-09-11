@@ -1,6 +1,9 @@
 PREFIX ?= $(CURDIR)
 BINDIR ?= $(HOME)/.local/bin
 BUILD := $(PREFIX)/.build/release/deskpet
+APPBUILD := $(PREFIX)/.build/DeskPet.app
+APPDIR := $(HOME)/Applications/DeskPet.app
+APPBIN := $(APPDIR)/Contents/MacOS/deskpet
 BIN := $(BINDIR)/deskpet
 PLIST := $(HOME)/Library/LaunchAgents/ai.deskpet.plist
 PLUGIN := $(HOME)/.config/opencode/plugins/deskpet.ts
@@ -11,10 +14,14 @@ LOG := $(HOME)/.codex/pets/deskpet.log
 HOOK_SRC := $(PREFIX)/plugin/codex-hook.py
 HOOK_INSTALL := $(PREFIX)/scripts/install-codex-hook.py
 
-.PHONY: build install run stop unload uninstall plugin hook
+.PHONY: build app install run stop unload uninstall plugin hook
 
 build:
 	swift build -c release --package-path $(PREFIX)
+
+app: build
+	chmod +x $(PREFIX)/scripts/make-app.sh $(PREFIX)/scripts/make-icns.swift
+	$(PREFIX)/scripts/make-app.sh $(BUILD) $(APPBUILD)
 
 plugin:
 	mkdir -p $(dir $(PLUGIN))
@@ -23,18 +30,23 @@ plugin:
 hook:
 	python3 $(HOOK_INSTALL) $(HOOK_SRC)
 
-$(BIN): build
-	mkdir -p $(BINDIR)
-	cp $(BUILD) $(BIN)
+$(APPDIR): app
+	mkdir -p $(HOME)/Applications
+	rm -rf $(APPDIR)
+	cp -R $(APPBUILD) $(APPDIR)
 
-$(PLIST): $(BIN)
+$(BIN): $(APPDIR)
+	mkdir -p $(BINDIR)
+	ln -sfn $(APPBIN) $(BIN)
+
+$(PLIST): $(APPDIR)
 	mkdir -p $(HOME)/Library/LaunchAgents $(HOME)/.codex/pets
 	printf '%s\n' \
 	'<?xml version="1.0" encoding="UTF-8"?>' \
 	'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
 	'<plist version="1.0"><dict>' \
 	'<key>Label</key><string>$(LABEL)</string>' \
-	'<key>ProgramArguments</key><array><string>$(BIN)</string></array>' \
+	'<key>ProgramArguments</key><array><string>$(APPBIN)</string></array>' \
 	'<key>RunAtLoad</key><true/>' \
 	'<key>KeepAlive</key><true/>' \
 	'<key>WorkingDirectory</key><string>$(HOME)</string>' \
@@ -42,7 +54,7 @@ $(PLIST): $(BIN)
 	'<key>StandardErrorPath</key><string>$(LOG)</string>' \
 	'</dict></plist>' > $(PLIST)
 
-install: $(BIN) plugin hook $(PLIST)
+install: $(APPDIR) $(BIN) plugin hook $(PLIST)
 	launchctl bootout gui/$(UID)/$(OLD_LABEL) 2>/dev/null || true
 	rm -f $(HOME)/Library/LaunchAgents/$(OLD_LABEL).plist
 	launchctl bootout gui/$(UID)/$(LABEL) 2>/dev/null || true
@@ -64,4 +76,5 @@ unload: stop
 
 uninstall: unload
 	rm -f $(BIN) $(PLUGIN)
+	rm -rf $(APPDIR)
 	python3 $(HOOK_INSTALL) --uninstall

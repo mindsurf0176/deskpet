@@ -1,37 +1,90 @@
 import AppKit
 import CoreGraphics
 
+enum Face: Equatable {
+    case floor
+    case top
+    case left
+    case right
+
+    var isVertical: Bool { self == .left || self == .right }
+}
+
+enum PetFacing: Equatable {
+    case upright
+    case left
+    case right
+}
+
 struct Surface: Equatable {
     var id: UInt32
-    var minX: CGFloat
-    var maxX: CGFloat
-    var y: CGFloat
+    var face: Face
+    var minAlong: CGFloat
+    var maxAlong: CGFloat
+    var depth: CGFloat
+    var bounds: NSRect
+    var outside: Bool
 
-    var isFloor: Bool { id == 0 }
+    var isFloor: Bool { face == .floor }
 
-    func contains(x: CGFloat) -> Bool {
-        x >= minX && x <= maxX
+    func contains(along value: CGFloat) -> Bool {
+        value >= minAlong && value <= maxAlong
+    }
+
+    func origin(chrome: NSSize, along: CGFloat) -> NSPoint {
+        let clamped = min(max(along, minAlong), max(minAlong, maxAlong - alongSpan(chrome: chrome)))
+        switch face {
+        case .floor, .top:
+            return NSPoint(x: clamped, y: depth)
+        case .left:
+            let x = outside ? depth - chrome.width : depth
+            return NSPoint(x: x, y: clamped)
+        case .right:
+            let x = outside ? depth : depth - chrome.width
+            return NSPoint(x: x, y: clamped)
+        }
+    }
+
+    func alongSpan(chrome: NSSize) -> CGFloat {
+        face.isVertical ? chrome.height : chrome.width
+    }
+
+    func along(of panelOrigin: NSPoint) -> CGFloat {
+        face.isVertical ? panelOrigin.y : panelOrigin.x
     }
 }
 
 enum SurfaceScanner {
+    static let screenLeftID: UInt32 = .max - 1
+    static let screenRightID: UInt32 = .max - 2
+
     static func floor(in screen: NSRect) -> Surface {
-        Surface(id: 0, minX: screen.minX, maxX: screen.maxX, y: screen.minY)
+        Surface(
+            id: 0,
+            face: .floor,
+            minAlong: screen.minX,
+            maxAlong: screen.maxX,
+            depth: screen.minY,
+            bounds: screen,
+            outside: false
+        )
     }
 
     static func ledges(
         excluding windowNumbers: Set<Int>,
         screen: NSRect,
-        petHeight: CGFloat
+        petSize: NSSize
     ) -> [Surface] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let info = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return [floor(in: screen)]
+            return screenEdges(screen: screen) + [floor(in: screen)]
         }
 
-        let maxSitY = screen.maxY - max(48, petHeight * 0.45)
+        let long = max(petSize.width, petSize.height)
+        let maxSitY = screen.maxY - max(48, petSize.height * 0.45)
         var occupied: [NSRect] = []
         var ledges: [Surface] = []
+        ledges.append(contentsOf: screenEdges(screen: screen))
         ledges.append(floor(in: screen))
 
         for rec in info {
@@ -43,24 +96,57 @@ enum SurfaceScanner {
             if alpha < 0.85 { continue }
             guard let quartz = rectValue(rec[kCGWindowBounds as String]) else { continue }
             let cocoa = cocoaRect(from: quartz)
-            if cocoa.width < 260 || cocoa.height < 70 { continue }
+            if cocoa.width < 240 || cocoa.height < 80 { continue }
             if cocoa.width >= screen.width - 8 && cocoa.height >= screen.height - 8 { continue }
             if !cocoa.intersects(screen.insetBy(dx: -40, dy: -40)) { continue }
-            if cocoa.maxY > maxSitY { continue }
 
-            let topBand = NSRect(x: cocoa.minX, y: cocoa.maxY - 3, width: cocoa.width, height: 6)
-            let covered = occupied.contains { $0.intersects(topBand) }
             occupied.append(cocoa)
-            if covered { continue }
+            let id = UInt32(truncatingIfNeeded: number)
 
-            ledges.append(
-                Surface(
-                    id: UInt32(truncatingIfNeeded: number),
-                    minX: cocoa.minX,
-                    maxX: cocoa.maxX,
-                    y: cocoa.maxY
+            if cocoa.maxY <= maxSitY {
+                let topBand = NSRect(x: cocoa.minX, y: cocoa.maxY - 3, width: cocoa.width, height: 6)
+                let covered = occupied.dropLast().contains { $0.intersects(topBand) }
+                if !covered {
+                    ledges.append(
+                        Surface(
+                            id: id,
+                            face: .top,
+                            minAlong: cocoa.minX,
+                            maxAlong: cocoa.maxX,
+                            depth: cocoa.maxY,
+                            bounds: cocoa,
+                            outside: false
+                        )
+                    )
+                }
+            }
+
+            if cocoa.height >= 120, cocoa.minX - long >= screen.minX + 4 {
+                ledges.append(
+                    Surface(
+                        id: id,
+                        face: .left,
+                        minAlong: cocoa.minY,
+                        maxAlong: cocoa.maxY,
+                        depth: cocoa.minX,
+                        bounds: cocoa,
+                        outside: true
+                    )
                 )
-            )
+            }
+            if cocoa.height >= 120, cocoa.maxX + long <= screen.maxX - 4 {
+                ledges.append(
+                    Surface(
+                        id: id,
+                        face: .right,
+                        minAlong: cocoa.minY,
+                        maxAlong: cocoa.maxY,
+                        depth: cocoa.maxX,
+                        bounds: cocoa,
+                        outside: true
+                    )
+                )
+            }
         }
         return ledges
     }
@@ -72,8 +158,39 @@ enum SurfaceScanner {
         ledges: [Surface]
     ) -> Surface {
         let mid = feetX + width / 2
-        let below = ledges.filter { $0.contains(x: mid) && $0.y <= feetY + 10 }
-        return below.max(by: { $0.y < $1.y }) ?? ledges.first { $0.isFloor } ?? Surface(id: 0, minX: 0, maxX: 0, y: 0)
+        let below = ledges.filter {
+            !$0.face.isVertical && $0.contains(along: mid) && $0.depth <= feetY + 10
+        }
+        return below.max(by: { $0.depth < $1.depth })
+            ?? ledges.first { $0.isFloor }
+            ?? Surface(id: 0, face: .floor, minAlong: 0, maxAlong: 0, depth: 0, bounds: .zero, outside: false)
+    }
+
+    static func sibling(_ ledges: [Surface], of surface: Surface, face: Face) -> Surface? {
+        ledges.first { $0.id == surface.id && $0.face == face }
+    }
+
+    private static func screenEdges(screen: NSRect) -> [Surface] {
+        [
+            Surface(
+                id: screenLeftID,
+                face: .left,
+                minAlong: screen.minY,
+                maxAlong: screen.maxY,
+                depth: screen.minX,
+                bounds: screen,
+                outside: false
+            ),
+            Surface(
+                id: screenRightID,
+                face: .right,
+                minAlong: screen.minY,
+                maxAlong: screen.maxY,
+                depth: screen.maxX,
+                bounds: screen,
+                outside: false
+            ),
+        ]
     }
 
     private static func cocoaRect(from quartz: CGRect) -> NSRect {
@@ -107,6 +224,31 @@ enum SurfaceScanner {
         if let n = raw as? Double { return CGFloat(n) }
         if let n = raw as? NSNumber { return CGFloat(truncating: n) }
         return nil
+    }
+}
+
+enum ImageRotate {
+    static func turn(_ image: CGImage, facing: PetFacing) -> CGImage {
+        guard facing != .upright else { return image }
+        let radians: CGFloat = facing == .left ? .pi / 2 : -.pi / 2
+        let width = image.height
+        let height = image.width
+        let space = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.interpolationQuality = .none
+        ctx.translateBy(x: CGFloat(width) / 2, y: CGFloat(height) / 2)
+        ctx.rotate(by: radians)
+        ctx.translateBy(x: -CGFloat(image.width) / 2, y: -CGFloat(image.height) / 2)
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return ctx.makeImage() ?? image
     }
 }
 

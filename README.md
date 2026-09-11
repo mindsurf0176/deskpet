@@ -3,7 +3,7 @@
 Always-on macOS overlay pet that reacts to OpenCode, Codex, Orca, and other agent terminals.
 
 Drag it. Click to wave. It walks when idle, jumps when work starts, waits on permission prompts, and slumps on errors.
-When "Sit on windows" is on, it perches on title bars and the desktop, and walks off the edge to fall.
+When "Sit on windows" is on, it perches on title bars, climbs window sides, and walks off the edge to fall.
 
 macOS 13+. No bundled sprites — drop a [Codex hatch-pet](docs/pets.md) into `~/.codex/pets/`.
 
@@ -17,7 +17,7 @@ cd deskpet
 make install
 ```
 
-Needs Swift 5.9+ (`xcode-select --install`). This builds a release binary into `~/.local/bin/deskpet`, copies the OpenCode plugin, and registers a Login Item (`ai.deskpet`).
+Needs Swift 5.9+ (`xcode-select --install`). This builds `~/Applications/DeskPet.app`, symlinks `~/.local/bin/deskpet`, copies the OpenCode plugin, and registers a Login Item (`ai.deskpet`).
 
 Restart OpenCode after install so the plugin loads.
 
@@ -28,7 +28,7 @@ make stop       # quit
 make uninstall  # quit + remove LaunchAgent, binary, plugin
 ```
 
-Settings live in the menu bar paw. Pick a pet, scale (0.35–1.5), click-through, captions, and whether it sits on windows. Position persists in `~/.codex/pets/deskpet-config.json`.
+Settings live in the menu bar paw. Pick a pet, scale, click-through, captions, window sitting, and alert sound. Waiting changes the menu bar icon; click the pet to bring the agent forward. Position persists in `~/.codex/pets/deskpet-config.json`.
 
 ## How it notices work
 
@@ -69,7 +69,7 @@ make install
 ```
 
 메뉴바 발바닥 아이콘 → 설정에서 크기와 펫을 바꿉니다. 스프라이트는 포함하지 않습니다. Codex `/pets` 또는 hatch-pet으로 `~/.codex/pets/<이름>/`에 두면 됩니다.
-창에 앉기는 설정에서 켤 수 있습니다. 타이틀바 위에 앉고, 가장자리에서 떨어집니다.
+창에 앉기는 설정에서 켤 수 있습니다. 타이틀바와 창 옆면을 오르고, 가장자리에서 떨어집니다. 승인 대기 중 펫을 클릭하면 에이전트 창을 앞으로 가져옵니다.
 
 OpenCode 플러그인은 앱 재시작 후 적용됩니다.
 Codex 훅은 설치 후 `/hooks`에서 한 번 신뢰해야 이 세션이 펫을 움직입니다.

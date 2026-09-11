@@ -7,6 +7,7 @@ final class PetView: NSView {
     var frameIndex = 0
     var reducedMotion = false
     private var currentImage: CGImage?
+    var facing: PetFacing = .upright
 
     init(atlas: SpriteAtlas) {
         self.atlas = atlas
@@ -28,8 +29,13 @@ final class PetView: NSView {
         let image = reducedMotion
             ? atlas.image(state: .idle, frame: 0)
             : atlas.image(state: state, frame: frameIndex)
-        currentImage = image
-        layer?.contents = image
+        if let image {
+            currentImage = ImageRotate.turn(image, facing: facing)
+            layer?.contents = currentImage
+        } else {
+            currentImage = nil
+            layer?.contents = nil
+        }
     }
 
     func opaque(at point: NSPoint, slop: CGFloat) -> Bool {
@@ -93,7 +99,9 @@ final class PetController: NSObject, NSWindowDelegate {
     var clickThroughEnabled: Bool { settings.clickThrough }
     var captionsEnabled: Bool { settings.captions }
     var perchEnabled: Bool { settings.perch }
+    var soundEnabled: Bool { settings.sound }
     private var displaySize: NSSize { settings.displaySize }
+    private var lastIconName = ""
 
     init(atlas: SpriteAtlas, settings: DeskPetSettings) {
         self.atlas = atlas
@@ -161,11 +169,24 @@ final class PetController: NSObject, NSWindowDelegate {
     private func layoutChrome() {
         let pet = displaySize
         let showCaption = !captionView.isHidden
+        let vertical = view.facing != .upright
+        if vertical {
+            captionView.isHidden = true
+        }
         let captionHeight: CGFloat = showCaption ? 26 : 0
         let gap: CGFloat = showCaption ? 6 : 0
-        let size = NSSize(width: pet.width, height: pet.height + captionHeight + gap)
+        let size = chromeSize()
         let origin = panel.frame.origin
-        view.frame = NSRect(origin: .zero, size: pet)
+        if vertical {
+            view.frame = NSRect(
+                x: (size.width - pet.width) / 2,
+                y: (size.height - pet.height) / 2,
+                width: pet.width,
+                height: pet.height
+            )
+        } else {
+            view.frame = NSRect(origin: .zero, size: pet)
+        }
         captionView.frame = NSRect(
             x: 6,
             y: pet.height + gap,
@@ -174,6 +195,49 @@ final class PetController: NSObject, NSWindowDelegate {
         )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         chrome.frame = NSRect(origin: .zero, size: size)
+    }
+
+    private func chromeSize() -> NSSize {
+        let pet = displaySize
+        if view.facing != .upright {
+            return NSSize(width: pet.height, height: pet.width)
+        }
+        let showCaption = !captionView.isHidden
+        let extra: CGFloat = showCaption ? 32 : 0
+        return NSSize(width: pet.width, height: pet.height + extra)
+    }
+
+    private func setFacing(_ facing: PetFacing) {
+        guard view.facing != facing else { return }
+        view.facing = facing
+        view.present()
+        if facing == .upright {
+            refreshCaption(from: signal, force: true)
+        } else {
+            captionView.isHidden = true
+            layoutChrome()
+        }
+    }
+
+    private func attach(to surface: Surface, along: CGFloat) {
+        let facing: PetFacing
+        switch surface.face {
+        case .left: facing = .left
+        case .right: facing = .right
+        case .top, .floor: facing = .upright
+        }
+        falling = false
+        fallSpeed = 0
+        wanderTarget = nil
+        hopping = false
+        currentPerch = surface
+        setFacing(facing)
+        let origin = surface.origin(chrome: chromeSize(), along: along)
+        panel.setFrameOrigin(origin)
+        if activity == .idle { play(.idle) }
+        if !surface.face.isVertical {
+            refreshCaption(from: signal, force: true)
+        }
     }
 
     private func configureStatusItem() {
@@ -293,7 +357,13 @@ final class PetController: NSObject, NSWindowDelegate {
             falling = false
             fallSpeed = 0
             currentPerch = nil
+            setFacing(.upright)
         }
+    }
+
+    func applySound(_ on: Bool) {
+        settings.sound = on
+        persist()
     }
 
     @objc private func openSettings() {
@@ -363,6 +433,32 @@ final class PetController: NSObject, NSWindowDelegate {
         case .idle: suffix = ""
         }
         statusItem?.button?.toolTip = suffix.isEmpty ? name : "\(name) · \(suffix)"
+        refreshStatusIcon()
+    }
+
+    private func refreshStatusIcon() {
+        let symbol: String
+        switch activity {
+        case .waiting: symbol = "bell.badge"
+        case .failed: symbol = "exclamationmark.triangle"
+        case .running: symbol = "pawprint.fill"
+        case .review, .idle: symbol = "pawprint"
+        }
+        guard symbol != lastIconName else { return }
+        lastIconName = symbol
+        let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: "DeskPet")
+            ?? NSImage(systemSymbolName: "pawprint", accessibilityDescription: "DeskPet")
+        icon?.isTemplate = true
+        statusItem?.button?.image = icon
+    }
+
+    private func playAlert() {
+        guard settings.sound, !reducedMotion else { return }
+        if let tink = NSSound(named: "Tink") {
+            tink.play()
+        } else {
+            NSSound(contentsOfFile: "/System/Library/Sounds/Tink.aiff", byReference: true)?.play()
+        }
     }
 
     private func startDisplayLink() {
@@ -445,6 +541,7 @@ final class PetController: NSObject, NSWindowDelegate {
         if next.kind == .waiting, previousKind != .waiting, !hidden {
             startHop()
             panel.orderFrontRegardless()
+            playAlert()
         }
         guard next.kind != activity else {
             if detailChanged { refreshTooltip() }
@@ -452,6 +549,7 @@ final class PetController: NSObject, NSWindowDelegate {
         }
         activity = next.kind
         refreshTooltip()
+        if next.kind == .failed { playAlert() }
         if dragging { return }
         switch next.kind {
         case .running:
@@ -521,9 +619,10 @@ final class PetController: NSObject, NSWindowDelegate {
 
     private func startHop() {
         guard !reducedMotion, !dragging else { return }
+        if currentPerch?.face.isVertical == true { return }
         hopping = true
         hopStart = CACurrentMediaTime()
-        hopBaseY = currentPerch?.y ?? panel.frame.origin.y
+        hopBaseY = currentPerch?.face.isVertical == true ? panel.frame.origin.y : (currentPerch?.depth ?? panel.frame.origin.y)
         falling = false
         fallSpeed = 0
     }
@@ -547,7 +646,7 @@ final class PetController: NSObject, NSWindowDelegate {
         ledges = SurfaceScanner.ledges(
             excluding: [panel.windowNumber],
             screen: screen,
-            petHeight: displaySize.height
+            petSize: displaySize
         )
     }
 
@@ -558,29 +657,45 @@ final class PetController: NSObject, NSWindowDelegate {
             refreshLedges()
         }
         if ledges.isEmpty { refreshLedges() }
+        if let perch = currentPerch, perch.face.isVertical, !falling {
+            if let live = ledges.first(where: { $0.id == perch.id && $0.face == perch.face }) {
+                currentPerch = live
+                let along = live.along(of: panel.frame.origin)
+                panel.setFrameOrigin(live.origin(chrome: chromeSize(), along: along))
+            } else {
+                falling = true
+                fallSpeed = 0
+                setFacing(.upright)
+            }
+            return
+        }
         let support = SurfaceScanner.support(
             feetX: panel.frame.origin.x,
             feetY: panel.frame.origin.y,
             width: displaySize.width,
             ledges: ledges
         )
-        let x = min(max(panel.frame.origin.x, support.minX), max(support.minX, support.maxX - displaySize.width))
+        let chrome = chromeSize()
+        let x = min(
+            max(panel.frame.origin.x, support.minAlong),
+            max(support.minAlong, support.maxAlong - chrome.width)
+        )
         if reducedMotion {
             falling = false
             fallSpeed = 0
-            currentPerch = support
-            panel.setFrameOrigin(NSPoint(x: x, y: support.y))
+            attach(to: support, along: x)
             return
         }
-        let gap = panel.frame.origin.y - support.y
+        let gap = panel.frame.origin.y - support.depth
         if gap > 3 {
             falling = true
         }
         if falling {
+            if view.facing != .upright { setFacing(.upright) }
             fallSpeed = min(24, fallSpeed + 1.2)
             var y = panel.frame.origin.y - fallSpeed
-            if y <= support.y {
-                y = support.y
+            if y <= support.depth {
+                y = support.depth
                 falling = false
                 fallSpeed = 0
                 currentPerch = support
@@ -593,11 +708,12 @@ final class PetController: NSObject, NSWindowDelegate {
             return
         }
         currentPerch = support
-        let outside = panel.frame.origin.x < support.minX - 1 || panel.frame.origin.x > support.maxX - displaySize.width + 1
+        let outside = panel.frame.origin.x < support.minAlong - 1
+            || panel.frame.origin.x > support.maxAlong - chrome.width + 1
         if outside {
-            panel.setFrameOrigin(NSPoint(x: x, y: support.y))
-        } else if abs(panel.frame.origin.y - support.y) > 0.5 {
-            panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: support.y))
+            panel.setFrameOrigin(NSPoint(x: x, y: support.depth))
+        } else if abs(panel.frame.origin.y - support.depth) > 0.5 {
+            panel.setFrameOrigin(NSPoint(x: panel.frame.origin.x, y: support.depth))
         }
     }
 
@@ -642,7 +758,12 @@ final class PetController: NSObject, NSWindowDelegate {
         if falling { return .jumping }
         if let oneshot { return oneshot }
         switch activity {
-        case .idle: return wanderTarget == nil ? .idle : ((wanderTarget! >= panel.frame.origin.x) ? .runningRight : .runningLeft)
+        case .idle:
+            guard let target = wanderTarget else { return .idle }
+            if currentPerch?.face.isVertical == true {
+                return target >= panel.frame.origin.y ? .runningRight : .runningLeft
+            }
+            return target >= panel.frame.origin.x ? .runningRight : .runningLeft
         case .running: return .running
         case .waiting: return .waiting
         case .failed: return .failed
@@ -655,51 +776,82 @@ final class PetController: NSObject, NSWindowDelegate {
         let screen = (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero
         if now - lastWanderStep < 0.09 { return }
         lastWanderStep = now
+        let chrome = chromeSize()
         let perch = currentPerch
-        let minX: CGFloat
-        let maxX: CGFloat
+        let vertical = perch?.face.isVertical == true
+        let span = vertical ? chrome.height : chrome.width
+        let minAlong: CGFloat
+        let maxAlong: CGFloat
         if settings.perch, let perch {
-            minX = perch.minX + 8
-            maxX = perch.maxX - displaySize.width - 8
+            minAlong = perch.minAlong + 8
+            maxAlong = perch.maxAlong - span - 8
         } else {
-            minX = screen.minX + 8
-            maxX = screen.maxX - displaySize.width - 8
+            minAlong = screen.minX + 8
+            maxAlong = screen.maxX - chrome.width - 8
         }
-        let sitY = perch?.y ?? panel.frame.origin.y
+        let current = vertical ? panel.frame.origin.y : panel.frame.origin.x
         if let target = wanderTarget {
-            let x = panel.frame.origin.x
             let step: CGFloat = 7
-            if abs(target - x) <= step {
-                panel.setFrameOrigin(NSPoint(x: target, y: sitY))
+            if abs(target - current) <= step {
+                if let perch, settings.perch {
+                    panel.setFrameOrigin(perch.origin(chrome: chrome, along: target))
+                } else {
+                    panel.setFrameOrigin(NSPoint(x: target, y: panel.frame.origin.y))
+                }
                 wanderTarget = nil
                 play(.idle)
                 nextWanderAt = now + Double.random(in: 12...28)
             } else {
-                let dir: CGFloat = target > x ? 1 : -1
-                var next = x + dir * step
-                if settings.perch, let perch, (next < perch.minX - 2 || next > perch.maxX - displaySize.width + 2) {
-                    falling = true
-                    fallSpeed = 0.6
-                    wanderTarget = nil
-                    currentPerch = nil
-                    let offX = next < perch.minX
-                        ? perch.minX - displaySize.width / 2 - 8
-                        : perch.maxX - displaySize.width / 2 + 8
-                    panel.setFrameOrigin(NSPoint(x: offX, y: panel.frame.origin.y))
+                let dir: CGFloat = target > current ? 1 : -1
+                var next = current + dir * step
+                if settings.perch, let perch, (next < perch.minAlong - 2 || next > perch.maxAlong - span + 2) {
+                    handleWalkOff(perch: perch, goingMin: next < perch.minAlong)
                     return
                 }
-                next = min(max(next, minX), max(minX, maxX))
-                panel.setFrameOrigin(NSPoint(x: next, y: sitY))
+                next = min(max(next, minAlong), max(minAlong, maxAlong))
+                if let perch, settings.perch {
+                    panel.setFrameOrigin(perch.origin(chrome: chrome, along: next))
+                } else {
+                    panel.setFrameOrigin(NSPoint(x: next, y: panel.frame.origin.y))
+                }
             }
             return
         }
         if now >= nextWanderAt {
-            guard maxX > minX else { return }
-            if settings.perch, let perch, Double.random(in: 0...1) < 0.22 {
-                wanderTarget = Bool.random() ? perch.minX - displaySize.width - 6 : perch.maxX + 6
+            guard maxAlong > minAlong else { return }
+            if settings.perch, let perch, Double.random(in: 0...1) < 0.28 {
+                wanderTarget = Bool.random() ? perch.minAlong - span - 6 : perch.maxAlong + 6
             } else {
-                wanderTarget = CGFloat.random(in: minX...maxX)
+                wanderTarget = CGFloat.random(in: minAlong...maxAlong)
             }
+        }
+    }
+
+    private func handleWalkOff(perch: Surface, goingMin: Bool) {
+        wanderTarget = nil
+        if perch.face == .top {
+            let sideFace: Face = goingMin ? .left : .right
+            if let side = SurfaceScanner.sibling(ledges, of: perch, face: sideFace) {
+                attach(to: side, along: side.maxAlong)
+                return
+            }
+        }
+        if perch.face.isVertical, !goingMin {
+            if let top = SurfaceScanner.sibling(ledges, of: perch, face: .top) {
+                let along = perch.face == .left ? top.minAlong : top.maxAlong
+                attach(to: top, along: along)
+                return
+            }
+        }
+        falling = true
+        fallSpeed = 0.6
+        currentPerch = nil
+        setFacing(.upright)
+        if perch.face == .top {
+            let offX = goingMin
+                ? perch.minAlong - displaySize.width / 2 - 8
+                : perch.maxAlong - displaySize.width / 2 + 8
+            panel.setFrameOrigin(NSPoint(x: offX, y: panel.frame.origin.y))
         }
     }
 
@@ -723,6 +875,8 @@ final class PetController: NSObject, NSWindowDelegate {
             wanderTarget = nil
             oneshot = nil
             hopping = false
+            currentPerch = nil
+            setFacing(.upright)
             panel.ignoresMouseEvents = false
         }
         guard dragging else { return }
@@ -745,6 +899,9 @@ final class PetController: NSObject, NSWindowDelegate {
             updateClickThrough(at: NSEvent.mouseLocation)
         } else if event.clickCount >= 1 {
             play(.waving)
+            if activity == .waiting || activity == .failed {
+                AgentFocus.activate(source: signal.source)
+            }
         }
     }
 

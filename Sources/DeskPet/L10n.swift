@@ -23,6 +23,7 @@ enum L10n {
     static var clickThrough: String { t("Click-through", ko: "클릭 통과") }
     static var captions: String { t("Captions", ko: "말풍선") }
     static var perch: String { t("Sit on windows", ko: "창에 앉기") }
+    static var sound: String { t("Alert sound", ko: "알림 소리") }
     static var captionWaiting: String { t("Needs you", ko: "허락해줘") }
     static var captionFailed: String { t("Ouch", ko: "앗") }
     static var captionReview: String { t("Done", ko: "끝") }
