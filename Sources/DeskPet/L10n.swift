@@ -10,6 +10,7 @@ enum L10n {
     }
 
     static var settings: String { t("Settings…", ko: "설정…") }
+    static var options: String { t("Options", ko: "옵션") }
     static var wave: String { t("Wave", ko: "인사") }
     static var hide: String { t("Hide", ko: "숨기기") }
     static var show: String { t("Show", ko: "보이기") }
