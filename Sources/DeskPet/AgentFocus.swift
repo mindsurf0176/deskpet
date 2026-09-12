@@ -81,8 +81,17 @@ enum AgentFocus {
             const response = await client.call('agentSession.reveal', { sessionId: hits[0].sessionId });
             if (response.ok !== true || response.result?.ok !== true) process.exit(3);
             const tabId = 'agent-session:' + hits[0].sessionId;
+            const worktree = 'id:' + response.result.workspaceId;
+            // Orca's renderer deliberately ignores focusEditorTab for a native
+            // chat in another workspace. Activate its workspace first, then
+            // allow the renderer to process that event before selecting the tab.
+            const activated = await client.call('worktree.activate', {
+                worktree, navigation: 'host'
+            });
+            if (activated.ok !== true) process.exit(6);
+            await new Promise(resolve => setTimeout(resolve, 300));
             const selected = await client.call('session.tabs.activate', {
-                worktree: 'id:' + response.result.workspaceId, tabId, navigation: 'all'
+                worktree, tabId, navigation: 'host'
             });
             process.exit(selected.ok === true && selected.result?.activeTabId === tabId ? 0 : 5);
         })().catch(() => process.exit(4));
