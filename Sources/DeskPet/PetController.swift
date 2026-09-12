@@ -600,13 +600,14 @@ final class PetController: NSObject, NSWindowDelegate {
         return "\(entry.source)-\(entry.updatedAt)"
     }
 
-    private func focusAgent(source: String, paneKey: String, tabId: String, worktreeId: String, cwd: String) {
+    private func focusAgent(source: String, paneKey: String, tabId: String, worktreeId: String, cwd: String, sessionId: String) {
         AgentFocus.activate(
             source: source,
             paneKey: paneKey,
             tabId: tabId,
             worktreeId: worktreeId,
-            cwd: cwd
+            cwd: cwd,
+            sessionId: sessionId
         )
     }
 
@@ -1107,11 +1108,11 @@ final class PetController: NSObject, NSWindowDelegate {
         guard event.clickCount >= 1 else { return }
         play(.waving)
         if activity == .waiting || activity == .failed {
-            focusAgent(source: signal.source, paneKey: signal.paneKey, tabId: signal.tabId, worktreeId: signal.worktreeId, cwd: signal.cwd)
+            focusAgent(source: signal.source, paneKey: signal.paneKey, tabId: signal.tabId, worktreeId: signal.worktreeId, cwd: signal.cwd, sessionId: signal.sessionId)
             return
         }
         if holdingDone, let done = doneFocus {
-            focusAgent(source: done.source, paneKey: done.paneKey, tabId: done.tabId, worktreeId: done.worktreeId, cwd: done.cwd)
+            focusAgent(source: done.source, paneKey: done.paneKey, tabId: done.tabId, worktreeId: done.worktreeId, cwd: done.cwd, sessionId: done.sessionId)
             doneFocus = nil
             doneUntil = 0
             refreshCaption(from: signal, force: true)
@@ -1119,7 +1120,7 @@ final class PetController: NSObject, NSWindowDelegate {
             return
         }
         if activity == .review {
-            focusAgent(source: signal.source, paneKey: signal.paneKey, tabId: signal.tabId, worktreeId: signal.worktreeId, cwd: signal.cwd)
+            focusAgent(source: signal.source, paneKey: signal.paneKey, tabId: signal.tabId, worktreeId: signal.worktreeId, cwd: signal.cwd, sessionId: signal.sessionId)
             return
         }
         if settings.captions, activity == .idle {

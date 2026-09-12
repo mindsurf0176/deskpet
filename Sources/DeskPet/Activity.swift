@@ -15,6 +15,7 @@ struct PluginState: Equatable {
 }
 
 struct ActivitySignal: Equatable {
+    var sessionId: String = ""
     var kind: ActivityKind
     var source: String
     var detail: String
@@ -36,6 +37,7 @@ struct ActivitySignal: Equatable {
     }
 
     init(_ state: PluginState) {
+        self.sessionId = state.sessionId
         self.kind = state.kind
         self.source = state.source
         self.detail = state.detail

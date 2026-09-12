@@ -27,6 +27,7 @@ final class DoneNotify: NSObject, UNUserNotificationCenterDelegate {
             "tabId": event.tabId,
             "worktreeId": event.worktreeId,
             "cwd": event.cwd,
+            "sessionId": event.sessionId,
         ]
         let request = UNNotificationRequest(
             identifier: "deskpet-done-\(UUID().uuidString)",
@@ -55,9 +56,9 @@ final class DoneNotify: NSObject, UNUserNotificationCenterDelegate {
             paneKey: info["paneKey"] as? String ?? "",
             tabId: info["tabId"] as? String ?? "",
             worktreeId: info["worktreeId"] as? String ?? "",
-            cwd: info["cwd"] as? String ?? ""
+            cwd: info["cwd"] as? String ?? "",
+            sessionId: info["sessionId"] as? String ?? ""
         )
         completionHandler()
     }
 }
-

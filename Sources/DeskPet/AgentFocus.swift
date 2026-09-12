@@ -9,9 +9,14 @@ enum AgentFocus {
         paneKey: String = "",
         tabId: String = "",
         worktreeId: String = "",
-        cwd: String = ""
+        cwd: String = "",
+        sessionId: String = ""
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
+            if focusOrcaChat(sessionId: sessionId) {
+                DispatchQueue.main.async { bringApp(source: "orca") }
+                return
+            }
             let shouldTryOrca = source == "orca"
                 || !cwd.isEmpty
                 || !paneKey.isEmpty || !tabId.isEmpty || !worktreeId.isEmpty
@@ -51,6 +56,50 @@ enum AgentFocus {
                 return
             }
         }
+    }
+
+    // Native Orca chats are not PTYs and never appear in terminal.list.
+    // Translate the provider thread ID to Orca's durable session ID first.
+    private static func focusOrcaChat(sessionId: String) -> Bool {
+        guard !sessionId.isEmpty else { return false }
+        let executable = "/Applications/Orca.app/Contents/MacOS/Orca"
+        guard FileManager.default.isExecutableFile(atPath: executable) else { return false }
+        let script = #"""
+        const fs = require('fs');
+        const path = require('path');
+        (async () => {
+            const home = require('os').homedir();
+            const dataPath = path.join(home, 'Library/Application Support/orca');
+            const registry = JSON.parse(fs.readFileSync(path.join(dataPath, 'agent-sessions/agent-sessions.json'), 'utf8'));
+            const thread = process.argv[1];
+            const hits = Object.values(registry.records || {}).filter(r =>
+                r.sessionId === thread || (r.providerHandleChain || []).some(l =>
+                    l.handle && l.handle.threadId === thread));
+            if (hits.length !== 1) process.exit(2);
+            const { RuntimeClient } = require('/Applications/Orca.app/Contents/Resources/app.asar.unpacked/out/cli/runtime-client.js');
+            const client = new RuntimeClient(dataPath, 5000, null, null);
+            const response = await client.call('agentSession.reveal', { sessionId: hits[0].sessionId });
+            if (response.ok !== true || response.result?.ok !== true) process.exit(3);
+            const tabId = 'agent-session:' + hits[0].sessionId;
+            const selected = await client.call('session.tabs.activate', {
+                worktree: 'id:' + response.result.workspaceId, tabId, navigation: 'all'
+            });
+            process.exit(selected.ok === true && selected.result?.activeTabId === tabId ? 0 : 5);
+        })().catch(() => process.exit(4));
+        """#
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["-e", script, sessionId]
+        var environment = ProcessInfo.processInfo.environment
+        environment["ELECTRON_RUN_AS_NODE"] = "1"
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return false }
+        process.waitUntilExit()
+        NSLog("DeskPet chat focus: %@ status=%d", sessionId, process.terminationStatus)
+        return process.terminationStatus == 0
     }
 
     @discardableResult
@@ -97,7 +146,7 @@ enum AgentFocus {
                 term["worktreePath"] as? String ?? "",
             ]
             if needles.contains(where: { needle in fields.contains(where: { field in
-                !needle.isEmpty && (field == needle || field.contains(needle) || needle.contains(field))
+                !needle.isEmpty && !field.isEmpty && field == needle
             }) }) {
                 return handle.isEmpty ? nil : handle
             }
