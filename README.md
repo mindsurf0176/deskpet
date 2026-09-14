@@ -11,6 +11,8 @@ macOS 13+. No bundled sprites — drop a [Codex hatch-pet](docs/pets.md) into `~
 
 ## Install
 
+Release packaging and validation: [release procedure](docs/releasing.md).
+
 ```bash
 git clone https://github.com/mindsurf0176/deskpet.git
 cd deskpet

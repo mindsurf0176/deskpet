@@ -10,7 +10,22 @@ enum DeskPetMain {
         guard let pet = PetCatalog.item(id: settings.petID) else {
             fputs("deskpet: no pets in \(PetCatalog.root.path)\n", stderr)
             fputs("Put a Codex hatch-pet at ~/.codex/pets/<id>/ (pet.json + spritesheet.webp)\n", stderr)
-            exit(1)
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            app.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Add a pet to DeskPet"
+            alert.informativeText = "Place a pet folder containing pet.json and spritesheet.webp in ~/.codex/pets, then reopen DeskPet. DeskPet does not include artwork."
+            alert.addButton(withTitle: "Open Pets Folder")
+            alert.addButton(withTitle: "Setup Guide")
+            alert.addButton(withTitle: "Quit")
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(PetCatalog.root)
+            } else if response == .alertSecondButtonReturn {
+                NSWorkspace.shared.open(URL(string: "https://github.com/mindsurf0176/deskpet/blob/main/docs/pets.md")!)
+            }
+            exit(0)
         }
         let atlas: SpriteAtlas
         do {
