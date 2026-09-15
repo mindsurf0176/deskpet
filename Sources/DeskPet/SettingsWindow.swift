@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import ServiceManagement
 
 final class SettingsPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -34,11 +35,12 @@ final class SettingsController: NSObject {
     private var soundLabel: NSTextField!
     private var dismissMonitor: Any?
     private var keyMonitor: Any?
+    private var loginBox: NSSwitch!
 
     init(owner: PetController) {
         self.owner = owner
         self.panel = SettingsPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 488),
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 620),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -134,7 +136,7 @@ final class SettingsController: NSObject {
     }
 
     private func buildUI() {
-        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 300, height: 488))
+        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 340, height: 620))
         effect.material = .menu
         effect.blendingMode = .behindWindow
         effect.state = .active
@@ -216,7 +218,17 @@ final class SettingsController: NSObject {
         soundLabel = sound.2
         soundBox = sound.1
 
+        let addPet = NSButton(title: "＋", target: self, action: #selector(importPet))
+        addPet.bezelStyle = .rounded
+        addPet.toolTip = "Add a pet · 펫 추가"
+        addPet.setAccessibilityLabel("Add a pet")
+        addPet.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(header)
+        root.addSubview(addPet)
+        NSLayoutConstraint.activate([
+            addPet.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            addPet.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+        ])
         root.addSubview(petCaption)
         root.addSubview(petPopup)
         root.addSubview(sizeRow)
@@ -233,6 +245,23 @@ final class SettingsController: NSObject {
         root.addSubview(perch.0)
         root.addSubview(gravity.0)
         root.addSubview(sound.0)
+        let login = toggleRow("Open at Login · 로그인 시 실행", #selector(loginChanged))
+        loginBox = login.1
+        root.addSubview(login.0)
+        let guide = NSButton(title: "Connection Guide · 연결 안내", target: self, action: #selector(showGuide))
+        guide.bezelStyle = .rounded
+        guide.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(guide)
+        NSLayoutConstraint.activate([
+            login.0.topAnchor.constraint(equalTo: sound.0.bottomAnchor, constant: 12),
+            login.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            login.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            login.0.heightAnchor.constraint(equalToConstant: 28),
+            guide.topAnchor.constraint(equalTo: login.0.bottomAnchor, constant: 12),
+            guide.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            guide.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            guide.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
+        ])
 
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 16),
@@ -242,7 +271,7 @@ final class SettingsController: NSObject {
 
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: addPet.leadingAnchor, constant: -12),
 
             petCaption.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 14),
             petCaption.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -327,12 +356,12 @@ final class SettingsController: NSObject {
             sound.0.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sound.0.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             sound.0.heightAnchor.constraint(equalToConstant: 28),
-            sound.0.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
         ])
 
         fillLanguagePopup()
         fillTonePopup()
-        panel.setContentSize(NSSize(width: 300, height: 488))
+        panel.setContentSize(NSSize(width: 340, height: 620))
     }
 
     private func toggleRow(_ title: String, _ action: Selector) -> (NSView, NSSwitch, NSTextField) {
@@ -462,6 +491,15 @@ final class SettingsController: NSObject {
     }
 
     private func syncControls() {
+        loginBox.isEnabled = LoginItem.isAvailable
+        loginBox.state = LoginItem.isEnabled ? .on : .off
+        if !LoginItem.isAvailable {
+            loginBox.toolTip = "Available once DeskPet.app is installed in Applications."
+        } else if LoginItem.needsApproval {
+            loginBox.toolTip = "Approve DeskPet in System Settings → General → Login Items."
+        } else {
+            loginBox.toolTip = nil
+        }
         guard let owner else { return }
         let id = owner.currentPetID
         if let index = petPopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == id }) {
@@ -487,6 +525,39 @@ final class SettingsController: NSObject {
         settings.scale = scale
         let size = settings.displaySize
         sizeLabel.stringValue = "\(Int(size.width.rounded()))×\(Int(size.height.rounded()))"
+    }
+
+    @objc private func loginChanged() {
+        let wantsLaunch = loginBox.state == .on
+        do {
+            try LoginItem.set(wantsLaunch)
+            if wantsLaunch && LoginItem.needsApproval {
+                SMAppService.openSystemSettingsLoginItems()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = wantsLaunch
+                ? "DeskPet could not be added to your login items"
+                : "DeskPet could not be removed from your login items"
+            alert.informativeText = error.localizedDescription
+                + "\n\nOpen Login Items in System Settings to change this manually."
+            alert.addButton(withTitle: "Open Login Items")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                SMAppService.openSystemSettingsLoginItems()
+            }
+        }
+        syncControls()
+    }
+
+    @objc private func showGuide() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/mindsurf0176/deskpet/blob/main/docs/getting-started.md")!)
+    }
+
+    @objc private func importPet() {
+        removeDismissMonitor()
+        if PetImport.choose() { reloadPets(); syncControls() }
+        installDismissMonitor()
     }
 
     @objc private func petChanged() {

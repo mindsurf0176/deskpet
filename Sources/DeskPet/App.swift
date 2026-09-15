@@ -7,26 +7,24 @@ enum DeskPetMain {
     static func main() {
         acquireLock()
         let settings = ConfigStore.load()
-        guard let pet = PetCatalog.item(id: settings.petID) else {
-            fputs("deskpet: no pets in \(PetCatalog.root.path)\n", stderr)
-            fputs("Put a Codex hatch-pet at ~/.codex/pets/<id>/ (pet.json + spritesheet.webp)\n", stderr)
+        while PetCatalog.item(id: settings.petID) == nil {
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
             app.activate(ignoringOtherApps: true)
             let alert = NSAlert()
-            alert.messageText = "Add a pet to DeskPet"
-            alert.informativeText = "Place a pet folder containing pet.json and spritesheet.webp in ~/.codex/pets, then reopen DeskPet. DeskPet does not include artwork."
-            alert.addButton(withTitle: "Open Pets Folder")
+            alert.messageText = "Meet your desktop companion"
+            alert.informativeText = "Add a pet to get started. Your companion reacts while you work and lets you know when your coding agent is done.\n\n시작하려면 펫을 추가하세요. pet.json과 spritesheet.webp가 들어 있는 폴더를 선택하면 됩니다."
+            alert.addButton(withTitle: "Add a Pet · 펫 추가")
             alert.addButton(withTitle: "Setup Guide")
             alert.addButton(withTitle: "Quit")
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                NSWorkspace.shared.open(PetCatalog.root)
-            } else if response == .alertSecondButtonReturn {
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: _ = PetImport.choose()
+            case .alertSecondButtonReturn:
                 NSWorkspace.shared.open(URL(string: "https://github.com/mindsurf0176/deskpet/blob/main/docs/pets.md")!)
+            default: exit(0)
             }
-            exit(0)
         }
+        guard let pet = PetCatalog.item(id: settings.petID) else { return }
         let atlas: SpriteAtlas
         do {
             atlas = try SpriteAtlas.load(from: pet.sheetURL)

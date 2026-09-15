@@ -11,7 +11,11 @@ macOS 13+. No bundled sprites — drop a [Codex hatch-pet](docs/pets.md) into `~
 
 ## Install
 
-Release packaging and validation: [release procedure](docs/releasing.md).
+Download the signed disk image from [Releases](https://github.com/mindsurf0176/deskpet/releases),
+drag DeskPet to Applications, and open it. Full walkthrough:
+[installation, pet setup, and agent connections](docs/getting-started.md).
+
+Building from source adds the agent hooks:
 
 ```bash
 git clone https://github.com/mindsurf0176/deskpet.git
@@ -19,7 +23,9 @@ cd deskpet
 make install
 ```
 
-Needs Swift 5.9+ (`xcode-select --install`). This builds `~/Applications/DeskPet.app`, symlinks `~/.local/bin/deskpet`, copies the OpenCode plugin, and registers a Login Item (`ai.deskpet`).
+Needs Swift 5.9+ (`xcode-select --install`). This builds `/Applications/DeskPet.app`, symlinks `~/.local/bin/deskpet`, copies the OpenCode plugin, and installs the Codex hook. It falls back to `~/Applications` when `/Applications` is not writable.
+
+Starting with macOS is a switch in the app: open the menu bar paw and turn on **Open at Login**. macOS may ask you to approve DeskPet in System Settings → General → Login Items. Installing over an older copy retires the `ai.deskpet` LaunchAgent that earlier versions used.
 
 Restart OpenCode after install so the plugin loads.
 
@@ -28,10 +34,10 @@ Orca's internal Codex uses a separate `hooks.json`; install merges that too. Tru
 
 ```bash
 make stop       # quit
-make uninstall  # quit + remove LaunchAgent, binary, plugin
+make uninstall  # quit + remove the app, binary, plugin, and hook
 ```
 
-Settings live in the menu bar paw. Pick a pet, scale, language, speech tone, click-through, captions, window sitting, gravity, and alert sound. Language defaults to Automatic, which follows macOS preferred languages (Korean, English, Japanese, Simplified/Traditional Chinese). Waiting changes the menu bar icon; click the pet to jump to the waiting Orca pane or Ghostty/Terminal/iTerm window. Position persists in `~/.codex/pets/deskpet-config.json`.
+Settings live in the menu bar paw. Add or pick a pet, then set scale, language, speech tone, click-through, captions, window sitting, gravity, alert sound, and Open at Login. Language defaults to Automatic, which follows macOS preferred languages (Korean, English, Japanese, Simplified/Traditional Chinese). Waiting changes the menu bar icon; click the pet to jump to the waiting Orca pane or Ghostty/Terminal/iTerm window. Position persists in `~/.codex/pets/deskpet-config.json`.
 
 ## How it notices work
 

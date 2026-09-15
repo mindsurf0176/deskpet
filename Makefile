@@ -2,15 +2,14 @@ PREFIX ?= $(CURDIR)
 BINDIR ?= $(HOME)/.local/bin
 BUILD := $(PREFIX)/.build/release/deskpet
 APPBUILD := $(PREFIX)/.build/DeskPet.app
-APPDIR := $(HOME)/Applications/DeskPet.app
+APPROOT := $(shell [ -w /Applications ] && echo /Applications || echo $(HOME)/Applications)
+APPDIR := $(APPROOT)/DeskPet.app
 APPBIN := $(APPDIR)/Contents/MacOS/deskpet
 BIN := $(BINDIR)/deskpet
-PLIST := $(HOME)/Library/LaunchAgents/ai.deskpet.plist
 PLUGIN := $(HOME)/.config/opencode/plugins/deskpet.ts
 LABEL := ai.deskpet
 OLD_LABEL := ai.minseo.deskpet
 UID := $(shell id -u)
-LOG := $(HOME)/.codex/pets/deskpet.log
 HOOK_SRC := $(PREFIX)/plugin/codex-hook.py
 HOOK_INSTALL := $(PREFIX)/scripts/install-codex-hook.py
 
@@ -30,51 +29,39 @@ plugin:
 hook:
 	python3 $(HOOK_INSTALL) $(HOOK_SRC)
 
-$(APPDIR): app
-	mkdir -p $(HOME)/Applications
+# Retire the LaunchAgent from older installs. Startup now lives in the app,
+# under Open at Login, so only one mechanism controls it.
+unload:
+	launchctl bootout gui/$(UID)/$(LABEL) 2>/dev/null || true
+	launchctl bootout gui/$(UID)/$(OLD_LABEL) 2>/dev/null || true
+	rm -f $(HOME)/Library/LaunchAgents/$(LABEL).plist $(HOME)/Library/LaunchAgents/$(OLD_LABEL).plist
+
+$(APPDIR): app unload
+	pkill -x deskpet 2>/dev/null || true
+	sleep 0.4
+	mkdir -p $(APPROOT)
 	rm -rf $(APPDIR)
 	cp -R $(APPBUILD) $(APPDIR)
+	[ "$(APPDIR)" = "$(HOME)/Applications/DeskPet.app" ] || rm -rf $(HOME)/Applications/DeskPet.app
 
 $(BIN): $(APPDIR)
 	mkdir -p $(BINDIR)
 	ln -sfn $(APPBIN) $(BIN)
 
-$(PLIST): $(APPDIR)
-	mkdir -p $(HOME)/Library/LaunchAgents $(HOME)/.codex/pets
-	printf '%s\n' \
-	'<?xml version="1.0" encoding="UTF-8"?>' \
-	'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-	'<plist version="1.0"><dict>' \
-	'<key>Label</key><string>$(LABEL)</string>' \
-	'<key>ProgramArguments</key><array><string>$(APPBIN)</string></array>' \
-	'<key>RunAtLoad</key><true/>' \
-	'<key>KeepAlive</key><true/>' \
-	'<key>WorkingDirectory</key><string>$(HOME)</string>' \
-	'<key>StandardOutPath</key><string>$(LOG)</string>' \
-	'<key>StandardErrorPath</key><string>$(LOG)</string>' \
-	'</dict></plist>' > $(PLIST)
-
-install: $(APPDIR) $(BIN) plugin hook $(PLIST)
-	launchctl bootout gui/$(UID)/$(OLD_LABEL) 2>/dev/null || true
-	rm -f $(HOME)/Library/LaunchAgents/$(OLD_LABEL).plist
-	launchctl bootout gui/$(UID)/$(LABEL) 2>/dev/null || true
-	sleep 0.4
-	launchctl bootstrap gui/$(UID) $(PLIST) 2>/dev/null || true
-	launchctl enable gui/$(UID)/$(LABEL)
-	launchctl kickstart -k gui/$(UID)/$(LABEL)
+install: $(APPDIR) $(BIN) plugin hook
+	mkdir -p $(HOME)/.codex/pets
+	open "$(APPDIR)"
+	@echo "Installed to $(APPDIR)."
+	@echo "Turn on Open at Login in the menu bar paw to start DeskPet with macOS."
 
 run: build
 	$(BUILD)
 
 stop:
-	launchctl bootout gui/$(UID)/$(LABEL) 2>/dev/null || true
-	launchctl bootout gui/$(UID)/$(OLD_LABEL) 2>/dev/null || true
 	pkill -x deskpet 2>/dev/null || true
 
-unload: stop
-	rm -f $(PLIST) $(HOME)/Library/LaunchAgents/$(OLD_LABEL).plist
-
-uninstall: unload
+uninstall: stop unload
 	rm -f $(BIN) $(PLUGIN)
-	rm -rf $(APPDIR)
+	rm -rf $(APPDIR) $(HOME)/Applications/DeskPet.app
 	python3 $(HOOK_INSTALL) --uninstall
+	@echo "If Open at Login was on, remove DeskPet in System Settings > General > Login Items."
